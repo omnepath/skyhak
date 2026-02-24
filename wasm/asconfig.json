@@ -1,0 +1,20 @@
+{
+  "targets": {
+    "debug": {
+      "outFile": "build/module.wasm",
+      "textFile": "build/module.wat",
+      "sourceMap": true,
+      "debug": true
+    },
+    "release": {
+      "outFile": "build/module.wasm",
+      "textFile": "build/module.wat",
+      "sourceMap": false,
+      "optimizeLevel": 3,
+      "shrinkLevel": 1
+    }
+  },
+  "options": {
+    "bindings": "esm"
+  }
+}
