@@ -10,7 +10,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "asbuild": "asc wasm/assembly/index.ts --outFile wasm/build/module.wasm --textFile wasm/build/module.wat --optimize && cp wasm/build/module.wasm public/module.wasm",
+    "asbuild": "asc wasm/assembly/index.ts --outFile wasm/build/module.wasm --textFile wasm/build/module.wat --optimize && node -e \"require('fs').copyFileSync('wasm/build/module.wasm', 'public/module.wasm')\"",
     "prebuild": "npm run asbuild"
   },
   "devDependencies": {
