@@ -25,8 +25,7 @@ export class Engine implements EngineAPI {
   readonly events: EventBus;
   readonly data: DataRegistry;
   readonly config: { width: number; height: number; targetFps: number };
-
-  private canvasManager: CanvasManager;
+  readonly canvasManager: CanvasManager;
   private inputManager: InputManager;
   private modeManager: ModeManager;
   private gameLoop: GameLoop;

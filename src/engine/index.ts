@@ -7,7 +7,7 @@ export { DataRegistry } from './data/DataRegistry';
 export { InputManager } from './input/InputManager';
 export { InputSnapshot } from './input/InputSnapshot';
 export { Canvas2DRenderer } from './render/Canvas2DRenderer';
-export { CanvasManager } from './render/CanvasManager';
+export { CanvasManager, type ScaleMode } from './render/CanvasManager';
 
 // Types & Interfaces
 export type { EngineAPI, GameMode, GameModule, ModeManagerAPI } from './interfaces';
