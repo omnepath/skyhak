@@ -4,6 +4,7 @@ import wasm from 'vite-plugin-wasm';
 import { resolve } from 'path';
 
 export default defineConfig({
+  base: '/skyhak/',
   plugins: [
     svelte(),
     wasm(),
