@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Engine } from './engine';
-  import { DemoModule } from './game/DemoModule';
+  import { CaptainSkyhawkModule } from './game';
 
   let viewport: HTMLDivElement;
   let engine: Engine;
@@ -11,12 +11,11 @@
     engine = new Engine();
     engine.mount(viewport);
 
-    // Load demo module (will be replaced by CaptainSkyhawkModule)
-    const demo = new DemoModule();
-    engine.loadModule(demo);
+    const game = new CaptainSkyhawkModule();
+    engine.loadModule(game);
 
     engine.start();
-    status = 'Running';
+    status = 'Captain Skyhawk — SkyHak Engine v0.1';
   });
 
   onDestroy(() => {
