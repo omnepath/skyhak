@@ -5,22 +5,24 @@
  * discrete button hit regions. Each active touch is tracked
  * independently so simultaneous d-pad + fire works.
  *
- * Coordinates are normalized (0-1) relative to the touch target
- * element, so they work at any screen size.
+ * Hit-testing uses getBoundingClientRect() on DOM overlay elements
+ * for pixel-accurate positions in any orientation/screen size.
+ * All touch events flow through the viewport element — DOM overlay
+ * elements have pointer-events: none.
  */
 
 import type { InputAdapter } from './InputAdapter';
 import type { GameAction } from './InputMap';
-import type { TouchOverlayLayout, DPadDef, TouchButtonDef } from './TouchLayout';
-import { TouchOverlayRenderer } from './TouchOverlayRenderer';
+import type { TouchOverlayLayout, TouchButtonDef } from './TouchLayout';
+import { TouchOverlayRenderer, type OverlayElements } from './TouchOverlayRenderer';
 
 interface ActiveTouch {
   id: number;
-  /** What this touch is bound to: 'dpad' or a button id */
+  /** What this touch is bound to: 'dpad', a button id, or 'none' */
   target: string;
-  /** Current normalized position */
-  nx: number;
-  ny: number;
+  /** Current client pixel position */
+  cx: number;
+  cy: number;
 }
 
 export class TouchAdapter implements InputAdapter {
@@ -83,19 +85,18 @@ export class TouchAdapter implements InputAdapter {
   }
 
   poll(): Set<string> {
-    // Recompute actions from active touches
     this.currentActions.clear();
     this.activeVisualIds.clear();
 
     for (const touch of this.activeTouches.values()) {
       if (touch.target === 'dpad') {
         this.resolveDPad(touch);
-      } else {
+      } else if (touch.target !== 'none') {
         this.resolveButton(touch);
       }
     }
 
-    // Re-render overlay with current state
+    // Update overlay visuals
     this.renderer.setActiveIds(this.activeVisualIds);
     this.renderer.render();
 
@@ -118,14 +119,19 @@ export class TouchAdapter implements InputAdapter {
     e.preventDefault();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
-      const [nx, ny] = this.normalize(t);
-      const target = this.hitTest(nx, ny);
+      const target = this.hitTest(t.clientX, t.clientY);
+
+      // Tap in center gap → reveal start/select
+      if (target === 'center_tap') {
+        this.renderer.revealCenter();
+        continue;
+      }
 
       this.activeTouches.set(t.identifier, {
         id: t.identifier,
         target,
-        nx,
-        ny,
+        cx: t.clientX,
+        cy: t.clientY,
       });
     }
   }
@@ -136,11 +142,9 @@ export class TouchAdapter implements InputAdapter {
       const t = e.changedTouches[i];
       const existing = this.activeTouches.get(t.identifier);
       if (existing) {
-        const [nx, ny] = this.normalize(t);
-        existing.nx = nx;
-        existing.ny = ny;
-        // D-pad touches stay locked to d-pad (don't re-hit-test on move)
-        // Button touches stay locked to their button
+        existing.cx = t.clientX;
+        existing.cy = t.clientY;
+        // D-pad and button touches stay locked to their target
       }
     }
   }
@@ -152,60 +156,104 @@ export class TouchAdapter implements InputAdapter {
     }
   }
 
-  // ── Hit testing ────────────────────────────────────────────
+  // ── Hit testing (pixel-based via DOM rects) ────────────────
 
-  private hitTest(nx: number, ny: number): string {
-    // Check d-pad first
-    const dpad = this.layout.dpad;
-    const ddx = nx - dpad.nx;
-    const ddy = ny - dpad.ny;
-    const dDist = Math.sqrt(ddx * ddx + ddy * ddy);
-    if (dDist < dpad.radius * 1.3) {
+  private hitTest(cx: number, cy: number): string {
+    const els = this.renderer.getElements();
+    if (!els) return this.hitTestFallback(cx, cy);
+
+    // Check d-pad region
+    const dpadRect = els.dpad.getBoundingClientRect();
+    // Expand d-pad hit zone slightly (1.2x)
+    const dpadCx = dpadRect.left + dpadRect.width / 2;
+    const dpadCy = dpadRect.top + dpadRect.height / 2;
+    const dpadR = Math.max(dpadRect.width, dpadRect.height) / 2 * 1.2;
+    const dDx = cx - dpadCx;
+    const dDy = cy - dpadCy;
+    if (Math.sqrt(dDx * dDx + dDy * dDy) < dpadR) {
       return 'dpad';
     }
 
-    // Check buttons (closest within radius)
-    let closestBtn: TouchButtonDef | null = null;
+    // Check action buttons (closest within hit radius)
+    let closestBtn: string | null = null;
     let closestDist = Infinity;
 
-    for (const btn of this.layout.buttons) {
-      const bx = nx - btn.nx;
-      const by = ny - btn.ny;
-      const bDist = Math.sqrt(bx * bx + by * by);
-      const hitRadius = btn.shape === 'rect'
-        ? Math.max(btn.width ?? 0.06, btn.height ?? 0.03) * 0.8
-        : btn.radius * 1.5;
+    for (const [id, el] of els.buttons) {
+      const rect = el.getBoundingClientRect();
+      const bCx = rect.left + rect.width / 2;
+      const bCy = rect.top + rect.height / 2;
+      const bR = Math.max(rect.width, rect.height) / 2 * 1.4; // generous hit zone
+      const dx = cx - bCx;
+      const dy = cy - bCy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (bDist < hitRadius && bDist < closestDist) {
-        closestBtn = btn;
-        closestDist = bDist;
+      if (dist < bR && dist < closestDist) {
+        closestBtn = id;
+        closestDist = dist;
       }
     }
 
-    if (closestBtn) return closestBtn.id;
+    if (closestBtn) return closestBtn;
 
-    // Fallback: if in left half, treat as d-pad; right half, ignore
-    if (nx < 0.4) return 'dpad';
+    // Check center gap — if visible, check start/select directly
+    // If not visible, a tap here reveals them
+    const screenW = window.innerWidth;
+    const centerZoneLeft = screenW * 0.3;
+    const centerZoneRight = screenW * 0.7;
+    const centerZoneTop = window.innerHeight * 0.7;
 
+    if (cx > centerZoneLeft && cx < centerZoneRight && cy > centerZoneTop) {
+      if (this.renderer.isCenterVisible) {
+        // Check start/select buttons specifically
+        for (const id of ['start', 'select']) {
+          const el = els.buttons.get(id);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          const bCx = rect.left + rect.width / 2;
+          const bCy = rect.top + rect.height / 2;
+          const bR = Math.max(rect.width, rect.height) / 2 * 1.5;
+          const dx = cx - bCx;
+          const dy = cy - bCy;
+          if (Math.sqrt(dx * dx + dy * dy) < bR) return id;
+        }
+      }
+      return 'center_tap';
+    }
+
+    // Fallback: left 40% → dpad
+    if (cx < screenW * 0.4) return 'dpad';
+
+    return 'none';
+  }
+
+  /** Fallback hit-testing if DOM elements aren't ready yet */
+  private hitTestFallback(cx: number, cy: number): string {
+    const screenW = window.innerWidth;
+    if (cx < screenW * 0.4) return 'dpad';
+    if (cx > screenW * 0.6) return 'btnA'; // default to fire
     return 'none';
   }
 
   // ── Action resolution ──────────────────────────────────────
 
   private resolveDPad(touch: ActiveTouch): void {
-    const dpad = this.layout.dpad;
-    const dx = touch.nx - dpad.nx;
-    const dy = touch.ny - dpad.ny;
+    const els = this.renderer.getElements();
+    if (!els) return;
+
+    const dpadRect = els.dpad.getBoundingClientRect();
+    const centerX = dpadRect.left + dpadRect.width / 2;
+    const centerY = dpadRect.top + dpadRect.height / 2;
+    const radius = dpadRect.width / 2;
+
+    const dx = touch.cx - centerX;
+    const dy = touch.cy - centerY;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Inside dead zone = no direction
-    if (dist < dpad.radius * dpad.deadZone) return;
+    // Dead zone
+    if (dist < radius * this.layout.dpad.deadZone) return;
 
-    // Normalize direction
+    // 8-way directional mapping
     const angle = Math.atan2(dy, dx);
-
-    // 8-way directional mapping with 45-degree sectors
-    // Right = 0, Down = PI/2, Left = PI, Up = -PI/2
     const absAngle = Math.abs(angle);
 
     if (absAngle < Math.PI * 3 / 8) {
@@ -235,16 +283,5 @@ export class TouchAdapter implements InputAdapter {
       this.currentActions.add(a);
     }
     this.activeVisualIds.add(btn.id);
-  }
-
-  // ── Coordinate normalization ───────────────────────────────
-
-  private normalize(touch: Touch): [number, number] {
-    if (!this.element) return [0, 0];
-    const rect = this.element.getBoundingClientRect();
-    return [
-      (touch.clientX - rect.left) / rect.width,
-      (touch.clientY - rect.top) / rect.height,
-    ];
   }
 }
