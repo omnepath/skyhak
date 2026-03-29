@@ -107,6 +107,14 @@ export class TouchAdapter implements InputAdapter {
     this.renderer.setOpacity(opacity);
   }
 
+  setHighlightOpacity(opacity: number): void {
+    this.renderer.setHighlightOpacity(opacity);
+  }
+
+  setHighlightEnabled(enabled: boolean): void {
+    this.renderer.setHighlightEnabled(enabled);
+  }
+
   dispose(): void {
     this.disconnect();
     this.renderer.unmount();
