@@ -249,7 +249,7 @@ export class IsometricMode implements GameMode {
       // Find a flat column (height 0) in the middle area
       let bestCol = -1;
       for (let c = 2; c < TERRAIN_COLS - 2; c++) {
-        if (row.heights[c] === 0) {
+        if (row[c] === 0) {
           bestCol = c;
           break;
         }
@@ -257,7 +257,7 @@ export class IsometricMode implements GameMode {
       // Try from the other side too
       if (bestCol === -1) {
         for (let c = TERRAIN_COLS - 3; c >= 2; c--) {
-          if (row.heights[c] === 0) {
+          if (row[c] === 0) {
             bestCol = c;
             break;
           }
