@@ -11,7 +11,7 @@
   let showSettings = $state(false);
   let currentInputMode = $state<InputMode>('auto');
   let touchActive = $state(false);
-  let touchOpacity = $state(0.35);
+  let touchOpacity = $state(0.5);
 
   onMount(() => {
     engine = new Engine();

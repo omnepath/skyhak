@@ -9,15 +9,22 @@
  * to the viewport and are handled by TouchAdapter. The DOM elements
  * serve as visual indicators AND as getBoundingClientRect() targets
  * for pixel-accurate hit-testing.
+ *
+ * Two independent visual controls:
+ * - **Base opacity**: how visible the idle controls are (0-1).
+ *   User can set this to 0 for fully invisible controls.
+ * - **Highlight opacity**: additive glow on press/hold (0-1).
+ *   User can set this independently so even invisible controls
+ *   flash on touch for UX feedback.
  */
 
-import type { TouchOverlayLayout, TouchButtonDef } from './TouchLayout';
+import type { TouchOverlayLayout } from './TouchLayout';
 
 /** Map of element IDs → live DOM elements, used by TouchAdapter for hit-testing */
 export interface OverlayElements {
   dpad: HTMLElement;
-  dpadDirections: Map<string, HTMLElement>; // 'up','down','left','right'
-  buttons: Map<string, HTMLElement>;        // button id → element
+  dpadDirections: Map<string, HTMLElement>;
+  buttons: Map<string, HTMLElement>;
 }
 
 export class TouchOverlayRenderer {
@@ -36,6 +43,11 @@ export class TouchOverlayRenderer {
   private buttonEls = new Map<string, HTMLElement>();
 
   private activeIds = new Set<string>();
+
+  /** Independent highlight opacity (0-1). Additive glow on press. */
+  private highlightOpacity = 0.6;
+  /** Whether highlight effect is enabled */
+  private highlightEnabled = true;
 
   constructor(layout: TouchOverlayLayout) {
     this.layout = layout;
@@ -72,31 +84,72 @@ export class TouchOverlayRenderer {
   setOpacity(opacity: number): void {
     this.layout.opacity = opacity;
     if (this.root) {
-      this.root.style.setProperty('--touch-opacity', String(opacity));
+      this.root.style.setProperty('--base-opacity', String(opacity));
     }
   }
 
+  setHighlightOpacity(opacity: number): void {
+    this.highlightOpacity = Math.max(0, Math.min(1, opacity));
+    if (this.root) {
+      this.root.style.setProperty('--highlight-opacity', String(this.highlightOpacity));
+    }
+  }
+
+  setHighlightEnabled(enabled: boolean): void {
+    this.highlightEnabled = enabled;
+  }
+
   render(): void {
-    // Update active/pressed visual states
-    const alpha = this.layout.opacity;
+    const base = this.layout.opacity;
+    const hlEnabled = this.highlightEnabled;
+    const hlAlpha = this.highlightOpacity;
 
     // D-pad directions
     for (const [dir, el] of this.dpadDirs) {
       const active = this.activeIds.has(`dpad_${dir}`);
-      el.style.opacity = String(active ? alpha * 0.85 : alpha * 0.3);
+      if (active && hlEnabled) {
+        el.style.opacity = String(Math.min(1, base + hlAlpha));
+        el.style.textShadow = `0 0 ${2}vmin rgba(255,255,255,${hlAlpha})`;
+      } else {
+        el.style.opacity = String(base * 0.6);
+        el.style.textShadow = 'none';
+      }
     }
 
-    // Buttons
+    // D-pad background
+    if (this.dpadEl) {
+      const anyDpad = ['up', 'down', 'left', 'right'].some(
+        (d) => this.activeIds.has(`dpad_${d}`),
+      );
+      if (anyDpad && hlEnabled) {
+        this.dpadEl.style.background = `rgba(255,255,255,${base * 0.12 + hlAlpha * 0.08})`;
+        this.dpadEl.style.boxShadow = `inset 0 0 3vmin rgba(255,255,255,${hlAlpha * 0.15})`;
+      } else {
+        this.dpadEl.style.background = `rgba(255,255,255,${base * 0.08})`;
+        this.dpadEl.style.boxShadow = 'none';
+      }
+    }
+
+    // Buttons (action + center)
     for (const [id, el] of this.buttonEls) {
       const active = this.activeIds.has(id);
-      el.style.opacity = String(active ? alpha * 0.8 : alpha * 0.3);
+      if (active && hlEnabled) {
+        el.style.opacity = String(Math.min(1, base + hlAlpha));
+        el.style.boxShadow = `0 0 2vmin rgba(255,255,255,${hlAlpha * 0.5}), inset 0 0 1.5vmin rgba(255,255,255,${hlAlpha * 0.2})`;
+        el.style.borderColor = `rgba(255,255,255,${Math.min(1, 0.4 + hlAlpha * 0.4)})`;
+        el.style.background = `rgba(255,255,255,${0.08 + hlAlpha * 0.12})`;
+      } else {
+        el.style.opacity = String(base * 0.6);
+        el.style.boxShadow = 'none';
+        el.style.borderColor = 'rgba(255,255,255,0.4)';
+        el.style.background = 'rgba(255,255,255,0.08)';
+      }
     }
   }
 
   // ── DOM construction ────────────────────────────────────
 
   private buildDOM(): void {
-    // Root overlay — covers full screen, no pointer events
     this.root = document.createElement('div');
     this.root.className = 'touch-overlay-root';
     Object.assign(this.root.style, {
@@ -109,14 +162,12 @@ export class TouchOverlayRenderer {
       zIndex: '10',
       overflow: 'hidden',
     });
-    this.root.style.setProperty('--touch-opacity', String(this.layout.opacity));
+    this.root.style.setProperty('--base-opacity', String(this.layout.opacity));
+    this.root.style.setProperty('--highlight-opacity', String(this.highlightOpacity));
 
-    // Build sections
     this.buildDPad();
     this.buildButtons();
     this.buildCenterButtons();
-
-    // Inject stylesheet
     this.injectStyles();
 
     document.body.appendChild(this.root);
@@ -125,12 +176,12 @@ export class TouchOverlayRenderer {
   private buildDPad(): void {
     if (!this.root) return;
 
-    // D-pad container — anchored bottom-left
+    // D-pad container — anchored bottom-left, raised above corner UI
     this.dpadContainer = document.createElement('div');
     this.dpadContainer.className = 'touch-dpad-container';
     Object.assign(this.dpadContainer.style, {
       position: 'fixed',
-      bottom: '4vmin',
+      bottom: '14vmin',
       left: '3vmin',
       width: '28vmin',
       height: '28vmin',
@@ -146,11 +197,11 @@ export class TouchOverlayRenderer {
       height: '100%',
       borderRadius: '50%',
       background: `rgba(255,255,255,${this.layout.opacity * 0.08})`,
+      transition: 'background 0.1s ease, box-shadow 0.1s ease',
       pointerEvents: 'none',
     });
     this.dpadContainer.appendChild(this.dpadEl);
 
-    // Direction arrows
     const dirs: [string, string][] = [
       ['up', 'top: 12%; left: 50%; transform: translateX(-50%);'],
       ['down', 'bottom: 12%; left: 50%; transform: translateX(-50%);'],
@@ -170,7 +221,8 @@ export class TouchOverlayRenderer {
         width: 6vmin; height: 6vmin;
         display: flex; align-items: center; justify-content: center;
         font-size: 3.5vmin; color: white;
-        opacity: ${this.layout.opacity * 0.3};
+        opacity: ${this.layout.opacity * 0.6};
+        transition: opacity 0.08s ease, text-shadow 0.08s ease;
         pointer-events: none; user-select: none;
       `);
       el.textContent = arrowChars[dir];
@@ -184,25 +236,22 @@ export class TouchOverlayRenderer {
   private buildButtons(): void {
     if (!this.root) return;
 
-    // Buttons container — anchored bottom-right
+    // Buttons container — anchored bottom-right, raised above corner UI
     this.buttonsContainer = document.createElement('div');
     this.buttonsContainer.className = 'touch-buttons-container';
     Object.assign(this.buttonsContainer.style, {
       position: 'fixed',
-      bottom: '4vmin',
+      bottom: '14vmin',
       right: '3vmin',
       width: '30vmin',
       height: '30vmin',
       pointerEvents: 'none',
     });
 
-    // Filter out start/select — they go in center
     const actionButtons = this.layout.buttons.filter(
       (b) => b.id !== 'start' && b.id !== 'select',
     );
 
-    // Position action buttons within their container
-    // Layout: A (main fire) bottom-right area, B left of A, C above A
     const btnPositions: Record<string, { right: string; bottom: string; size: string }> = {
       btnA: { right: '2vmin', bottom: '8vmin', size: '11vmin' },
       btnB: { right: '15vmin', bottom: '3vmin', size: '11vmin' },
@@ -234,7 +283,8 @@ export class TouchOverlayRenderer {
           fontSize: btn.id === 'special' ? '2.8vmin' : '3.5vmin',
           fontFamily: 'monospace',
           fontWeight: 'bold',
-          opacity: String(this.layout.opacity * 0.3),
+          opacity: String(this.layout.opacity * 0.6),
+          transition: 'opacity 0.08s ease, box-shadow 0.15s ease, background 0.08s ease, border-color 0.08s ease',
           pointerEvents: 'none',
           userSelect: 'none',
         });
@@ -251,12 +301,12 @@ export class TouchOverlayRenderer {
   private buildCenterButtons(): void {
     if (!this.root) return;
 
-    // Center container for start/select — always visible at bottom center
+    // Center container for start/select — raised above corner UI
     this.centerContainer = document.createElement('div');
     this.centerContainer.className = 'touch-center-container';
     Object.assign(this.centerContainer.style, {
       position: 'fixed',
-      bottom: '2vmin',
+      bottom: '10vmin',
       left: '50%',
       transform: 'translateX(-50%)',
       display: 'flex',
@@ -282,7 +332,8 @@ export class TouchOverlayRenderer {
         fontFamily: 'monospace',
         fontWeight: 'bold',
         letterSpacing: '0.1em',
-        opacity: String(this.layout.opacity * 0.5),
+        opacity: String(this.layout.opacity * 0.6),
+        transition: 'opacity 0.08s ease, box-shadow 0.15s ease, background 0.08s ease, border-color 0.08s ease',
         pointerEvents: 'none',
         userSelect: 'none',
       });
@@ -295,7 +346,6 @@ export class TouchOverlayRenderer {
   }
 
   private injectStyles(): void {
-    // Minimal keyframes for pressed feedback
     const style = document.createElement('style');
     style.textContent = `
       .touch-overlay-root * { box-sizing: border-box; }

@@ -57,5 +57,5 @@ export const DEFAULT_TOUCH_LAYOUT: TouchOverlayLayout = {
     { id: 'select', action: 'cancel',  nx: 0.40, ny: 0.94, radius: 0.03,  label: 'SELECT', shape: 'rect', width: 0.09, height: 0.035 },
     { id: 'special', action: 'special', nx: 0.87, ny: 0.55, radius: 0.035, label: 'C', shape: 'circle' },
   ],
-  opacity: 0.35,
+  opacity: 0.5,
 };
