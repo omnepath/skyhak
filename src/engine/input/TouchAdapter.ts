@@ -124,6 +124,10 @@ export class TouchAdapter implements InputAdapter {
 
   private onTouchStart(e: TouchEvent): void {
     e.preventDefault();
+
+    // Any touch on screen wakes hidden UI (start/select)
+    this.renderer.wakeUI();
+
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
       const target = this.hitTest(t.clientX, t.clientY);
@@ -176,10 +180,14 @@ export class TouchAdapter implements InputAdapter {
     }
 
     // Check action buttons (closest within hit radius)
+    // Start/select only hittable when center UI is awake
+    const centerAwake = this.renderer.isCenterAwake;
     let closestBtn: string | null = null;
     let closestDist = Infinity;
 
     for (const [id, el] of els.buttons) {
+      if (!centerAwake && (id === 'start' || id === 'select')) continue;
+
       const rect = el.getBoundingClientRect();
       const bCx = rect.left + rect.width / 2;
       const bCy = rect.top + rect.height / 2;

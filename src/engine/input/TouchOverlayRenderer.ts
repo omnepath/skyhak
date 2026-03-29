@@ -49,6 +49,14 @@ export class TouchOverlayRenderer {
   /** Whether highlight effect is enabled */
   private highlightEnabled = true;
 
+  /** Whether center buttons (start/select) are currently awake/visible */
+  private centerAwake = false;
+  private centerFadeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** How long center buttons stay visible after wake (ms) */
+  private centerFadeDuration = 4000;
+  /** Fade-out CSS transition duration (ms) — must match CSS transition below */
+  private centerFadeTransition = 600;
+
   constructor(layout: TouchOverlayLayout) {
     this.layout = layout;
   }
@@ -62,6 +70,10 @@ export class TouchOverlayRenderer {
     if (this.root) {
       this.root.remove();
       this.root = null;
+    }
+    if (this.centerFadeTimer) {
+      clearTimeout(this.centerFadeTimer);
+      this.centerFadeTimer = null;
     }
     this.dpadDirs.clear();
     this.buttonEls.clear();
@@ -97,6 +109,39 @@ export class TouchOverlayRenderer {
 
   setHighlightEnabled(enabled: boolean): void {
     this.highlightEnabled = enabled;
+  }
+
+  /** Wake all hidden UI — center buttons become visible and operable */
+  wakeUI(): void {
+    if (!this.centerContainer) return;
+
+    this.centerAwake = true;
+    // Immediate snap to visible
+    this.centerContainer.style.transition = 'none';
+    this.centerContainer.style.opacity = '1';
+    // Re-enable transition for the upcoming fade
+    requestAnimationFrame(() => {
+      if (this.centerContainer) {
+        this.centerContainer.style.transition = `opacity ${this.centerFadeTransition}ms ease`;
+      }
+    });
+
+    // Reset fade timer
+    if (this.centerFadeTimer) clearTimeout(this.centerFadeTimer);
+    this.centerFadeTimer = setTimeout(() => {
+      if (this.centerContainer) {
+        this.centerContainer.style.opacity = '0';
+      }
+      // Mark as not awake after the CSS transition completes
+      this.centerFadeTimer = setTimeout(() => {
+        this.centerAwake = false;
+      }, this.centerFadeTransition);
+    }, this.centerFadeDuration);
+  }
+
+  /** Whether center buttons are currently visible and operable */
+  get isCenterAwake(): boolean {
+    return this.centerAwake;
   }
 
   render(): void {
@@ -301,7 +346,7 @@ export class TouchOverlayRenderer {
   private buildCenterButtons(): void {
     if (!this.root) return;
 
-    // Center container for start/select — raised above corner UI
+    // Center container for start/select — hidden by default, tap screen to wake
     this.centerContainer = document.createElement('div');
     this.centerContainer.className = 'touch-center-container';
     Object.assign(this.centerContainer.style, {
@@ -311,6 +356,8 @@ export class TouchOverlayRenderer {
       transform: 'translateX(-50%)',
       display: 'flex',
       gap: '3vmin',
+      opacity: '0',
+      transition: `opacity ${this.centerFadeTransition}ms ease`,
       pointerEvents: 'none',
     });
 
