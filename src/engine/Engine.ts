@@ -9,10 +9,14 @@ import { Canvas2DRenderer } from './render/Canvas2DRenderer';
 import { InputManager } from './input/InputManager';
 import { KeyboardAdapter } from './input/KeyboardAdapter';
 import { GamepadAdapter } from './input/GamepadAdapter';
+import { TouchAdapter } from './input/TouchAdapter';
 import { DEFAULT_INPUT_MAP } from './input/InputMap';
+import { DEFAULT_TOUCH_LAYOUT } from './input/TouchLayout';
 import { InputSnapshot } from './input/InputSnapshot';
 import { EventBus } from './events/EventBus';
 import { DataRegistry } from './data/DataRegistry';
+
+export type InputMode = 'auto' | 'keyboard' | 'touch' | 'gamepad';
 
 /**
  * Top-level engine orchestrator.
@@ -26,12 +30,20 @@ export class Engine implements EngineAPI {
   readonly data: DataRegistry;
   readonly config: { width: number; height: number; targetFps: number };
   readonly canvasManager: CanvasManager;
+
   private inputManager: InputManager;
   private modeManager: ModeManager;
   private gameLoop: GameLoop;
   private _input: InputSnapshot = InputSnapshot.empty();
   private _time = 0;
   private _delta = 0;
+
+  private touchAdapter: TouchAdapter | null = null;
+  private keyboardAdapter: KeyboardAdapter;
+  private gamepadAdapter: GamepadAdapter;
+  private _inputMode: InputMode = 'auto';
+  private _isMobile: boolean;
+  private _viewportElement: HTMLElement | null = null;
 
   constructor(engineConfig: Partial<EngineConfig> = {}) {
     const cfg = { ...DEFAULT_ENGINE_CONFIG, ...engineConfig };
@@ -45,10 +57,13 @@ export class Engine implements EngineAPI {
     this.canvasManager = new CanvasManager(cfg);
     this.renderer = new Canvas2DRenderer(this.canvasManager.getCanvas());
 
-    // Input
+    // Detect mobile
+    this._isMobile = this.detectMobile();
+
+    // Input adapters
+    this.keyboardAdapter = new KeyboardAdapter(DEFAULT_INPUT_MAP);
+    this.gamepadAdapter = new GamepadAdapter(DEFAULT_INPUT_MAP);
     this.inputManager = new InputManager();
-    this.inputManager.addAdapter(new KeyboardAdapter(DEFAULT_INPUT_MAP));
-    this.inputManager.addAdapter(new GamepadAdapter(DEFAULT_INPUT_MAP));
 
     // Events & Data
     this.events = new EventBus();
@@ -69,6 +84,18 @@ export class Engine implements EngineAPI {
     return this._input;
   }
 
+  get inputMode(): InputMode {
+    return this._inputMode;
+  }
+
+  get isMobile(): boolean {
+    return this._isMobile;
+  }
+
+  get touchEnabled(): boolean {
+    return this.touchAdapter !== null && this.touchAdapter.isConnected();
+  }
+
   getTime(): number {
     return this._time;
   }
@@ -81,9 +108,24 @@ export class Engine implements EngineAPI {
     this.modeManager.requestMode(modeId);
   }
 
-  /** Mount the canvas to a container element and load a game module */
+  /** Mount the canvas to a container element */
   mount(container: HTMLElement): void {
+    this._viewportElement = container;
     this.canvasManager.mount(container);
+    this.applyInputMode(this._inputMode);
+  }
+
+  /** Switch input mode at runtime */
+  setInputMode(mode: InputMode): void {
+    this._inputMode = mode;
+    if (this._viewportElement) {
+      this.applyInputMode(mode);
+    }
+  }
+
+  /** Set touch overlay opacity (0 = hidden, 1 = fully visible) */
+  setTouchOpacity(opacity: number): void {
+    this.touchAdapter?.setOpacity(opacity);
   }
 
   /** Load a game module: register its modes and init */
@@ -120,9 +162,53 @@ export class Engine implements EngineAPI {
 
   dispose(): void {
     this.stop();
+    this.touchAdapter?.dispose();
     this.inputManager.dispose();
     this.canvasManager.unmount();
     this.events.clear();
     this.data.clear();
+  }
+
+  // ── Input mode management ────────────────────────────────
+
+  private applyInputMode(mode: InputMode): void {
+    // Remove all adapters first
+    this.inputManager.removeAdapter('keyboard');
+    this.inputManager.removeAdapter('gamepad');
+    this.inputManager.removeAdapter('touch');
+    this.touchAdapter?.dispose();
+    this.touchAdapter = null;
+
+    const enableTouch = mode === 'touch' || (mode === 'auto' && this._isMobile);
+    const enableKeyboard = mode === 'keyboard' || mode === 'auto';
+    const enableGamepad = mode === 'gamepad' || mode === 'auto';
+
+    if (enableKeyboard) {
+      this.inputManager.addAdapter(this.keyboardAdapter);
+    }
+
+    if (enableGamepad) {
+      this.inputManager.addAdapter(this.gamepadAdapter);
+    }
+
+    if (enableTouch && this._viewportElement) {
+      this.touchAdapter = new TouchAdapter(DEFAULT_TOUCH_LAYOUT);
+      this.touchAdapter.attachTo(this._viewportElement);
+      this.inputManager.addAdapter(this.touchAdapter);
+    }
+
+    this.events.emit('input:mode-changed', { mode, touchEnabled: enableTouch });
+  }
+
+  private detectMobile(): boolean {
+    if (typeof window === 'undefined') return false;
+    // Check for touch capability + small screen
+    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const smallScreen = window.innerWidth < 800;
+    // Also check user agent for common mobile patterns
+    const mobileUA = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent,
+    );
+    return hasTouch && (smallScreen || mobileUA);
   }
 }

@@ -1,5 +1,5 @@
 // Engine public API
-export { Engine } from './Engine';
+export { Engine, type InputMode } from './Engine';
 export { GameLoop } from './GameLoop';
 export { ModeManager } from './ModeManager';
 export { EventBus } from './events/EventBus';
@@ -13,6 +13,8 @@ export { CanvasManager, type ScaleMode } from './render/CanvasManager';
 export type { EngineAPI, GameMode, GameModule, ModeManagerAPI } from './interfaces';
 export type { Renderer } from './render/Renderer';
 export type { InputAdapter } from './input/InputAdapter';
+export { TouchAdapter } from './input/TouchAdapter';
+export { DEFAULT_TOUCH_LAYOUT, type TouchOverlayLayout } from './input/TouchLayout';
 export type { Vec2, Vec3, Rect, Color, SpriteRef, DrawOpts, EngineConfig } from './types';
 export { DEFAULT_ENGINE_CONFIG } from './types';
 
