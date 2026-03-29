@@ -5,6 +5,8 @@
  * as arrays in IsometricMode. No ECS overhead — just update loops.
  */
 
+export type ProjectileType = 'bullet' | 'missile' | 'enemy';
+
 export interface Projectile {
   x: number;
   y: number;         // screen Y
@@ -12,6 +14,7 @@ export interface Projectile {
   vx: number;
   vy: number;        // screen velocity (negative = moves up-screen / forward)
   fromPlayer: boolean;
+  type: ProjectileType;
   life: number;      // seconds remaining
 }
 
@@ -56,3 +59,17 @@ export const ENEMY_DEFS: Record<EnemyType, {
 export const PLAYER_BULLET_SPEED = 180; // px/s upward
 export const PLAYER_FIRE_COOLDOWN = 0.2; // 5 shots per second
 export const PROJECTILE_LIFETIME = 2.0;  // seconds
+
+// Missile spread (B button / altFire)
+export const MISSILE_SPREAD_COUNT = 5;       // number of missiles in the fan
+export const MISSILE_SPEED = 140;            // slightly slower than bullets
+export const MISSILE_SPREAD_ANGLE = 0.6;     // radians total spread (~34 degrees)
+export const MISSILE_COOLDOWN = 10.0;        // seconds between uses
+export const MISSILE_LIFETIME = 1.5;
+
+// Boost (C button / special)
+export const BOOST_FUEL_MAX = 1.0;           // full tank = 1.0
+export const BOOST_BURN_RATE = 0.4;          // fuel consumed per second while boosting
+export const BOOST_RECHARGE_RATE = 0.1;      // fuel recovered per second when not boosting
+export const BOOST_SPEED_MULTIPLIER = 2.5;   // scroll speed multiplier when boosting
+export const BOOST_MIN_FUEL = 0.05;          // minimum fuel to activate
