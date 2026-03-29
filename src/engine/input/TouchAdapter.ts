@@ -125,8 +125,19 @@ export class TouchAdapter implements InputAdapter {
   private onTouchStart(e: TouchEvent): void {
     e.preventDefault();
 
-    // Any touch on screen wakes hidden UI (start/select)
-    this.renderer.wakeUI();
+    // Wake hidden UI only when tapping the play screen (canvas), not other UI
+    const canvas = this.element?.querySelector('canvas');
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.clientX >= rect.left && t.clientX <= rect.right &&
+            t.clientY >= rect.top && t.clientY <= rect.bottom) {
+          this.renderer.wakeUI();
+          break;
+        }
+      }
+    }
 
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
