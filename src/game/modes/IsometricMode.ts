@@ -24,6 +24,8 @@ import { getPalette, type LevelPalette } from '../data/palettes';
 import type { Projectile, Enemy } from '../entities/Entities';
 import {
   ENEMY_DEFS, PLAYER_BULLET_SPEED, PLAYER_FIRE_COOLDOWN, PROJECTILE_LIFETIME,
+  MISSILE_SPREAD_COUNT, MISSILE_SPEED, MISSILE_SPREAD_ANGLE, MISSILE_COOLDOWN, MISSILE_LIFETIME,
+  BOOST_FUEL_MAX, BOOST_BURN_RATE, BOOST_RECHARGE_RATE, BOOST_SPEED_MULTIPLIER, BOOST_MIN_FUEL,
 } from '../entities/Entities';
 
 // Player constants
@@ -83,6 +85,12 @@ export class IsometricMode implements GameMode {
   private projectiles: Projectile[] = [];
   private enemies: Enemy[] = [];
   private playerFireCooldown = 0;
+  private missileCooldown = 0;
+
+  // Boost
+  private boostFuel = BOOST_FUEL_MAX;
+  private boosting = false;
+  private baseScrollSpeed = 0;
 
   constructor(gameState: GameState) {
     this.gameState = gameState;
@@ -118,6 +126,10 @@ export class IsometricMode implements GameMode {
     this.projectiles = [];
     this.enemies = [];
     this.playerFireCooldown = 0;
+    this.missileCooldown = 0;
+    this.boostFuel = BOOST_FUEL_MAX;
+    this.boosting = false;
+    this.baseScrollSpeed = this.mission.scrollSpeed;
     this.spawnEnemies();
   }
 
@@ -155,11 +167,29 @@ export class IsometricMode implements GameMode {
     this.playerX = clamp(this.playerX, minX, maxX);
     this.playerAltitude = clamp(this.playerAltitude, PLAYER_MIN_ALTITUDE, PLAYER_MAX_ALTITUDE);
 
-    // Player fire
+    // Player fire (A button)
     this.playerFireCooldown = Math.max(0, this.playerFireCooldown - dt);
     if (input.isHeld('fire') && this.playerFireCooldown <= 0) {
       this.spawnPlayerBullet();
       this.playerFireCooldown = PLAYER_FIRE_COOLDOWN;
+    }
+
+    // Missile spread (B button)
+    this.missileCooldown = Math.max(0, this.missileCooldown - dt);
+    if (input.isPressed('altFire') && this.missileCooldown <= 0) {
+      this.spawnMissileSpread();
+      this.missileCooldown = MISSILE_COOLDOWN;
+    }
+
+    // Boost (C button) — hold to burn, release to recharge
+    this.boosting = input.isHeld('special') && this.boostFuel > BOOST_MIN_FUEL;
+    if (this.boosting) {
+      this.boostFuel = Math.max(0, this.boostFuel - BOOST_BURN_RATE * dt);
+      this.camera.scrollSpeed = this.baseScrollSpeed * BOOST_SPEED_MULTIPLIER;
+      if (this.boostFuel <= 0) this.boosting = false;
+    } else {
+      this.boostFuel = Math.min(BOOST_FUEL_MAX, this.boostFuel + BOOST_RECHARGE_RATE * dt);
+      this.camera.scrollSpeed = this.baseScrollSpeed;
     }
 
     this.camera.update(dt);
@@ -324,8 +354,31 @@ export class IsometricMode implements GameMode {
       vx: 0,
       vy: -PLAYER_BULLET_SPEED,
       fromPlayer: true,
+      type: 'bullet',
       life: PROJECTILE_LIFETIME,
     });
+  }
+
+  private spawnMissileSpread(): void {
+    const altOffset = this.playerAltitude * 3;
+    const originY = PLAYER_SCREEN_Y - altOffset - JET_HEIGHT / 2;
+    const halfSpread = MISSILE_SPREAD_ANGLE / 2;
+
+    for (let i = 0; i < MISSILE_SPREAD_COUNT; i++) {
+      // Fan from -halfSpread to +halfSpread, centered on straight up (-PI/2)
+      const t = MISSILE_SPREAD_COUNT === 1 ? 0 : (i / (MISSILE_SPREAD_COUNT - 1)) * 2 - 1;
+      const angle = -Math.PI / 2 + t * halfSpread;
+      this.projectiles.push({
+        x: this.playerX,
+        y: originY,
+        altitude: this.playerAltitude,
+        vx: Math.cos(angle) * MISSILE_SPEED,
+        vy: Math.sin(angle) * MISSILE_SPEED,
+        fromPlayer: true,
+        type: 'missile',
+        life: MISSILE_LIFETIME,
+      });
+    }
   }
 
   private spawnEnemyBullet(enemy: Enemy): void {
@@ -347,6 +400,7 @@ export class IsometricMode implements GameMode {
       vx: (dx / dist) * speed,
       vy: (dy / dist) * speed,
       fromPlayer: false,
+      type: 'enemy',
       life: PROJECTILE_LIFETIME,
     });
   }
@@ -454,10 +508,16 @@ export class IsometricMode implements GameMode {
 
   private renderProjectiles(r: Renderer): void {
     for (const p of this.projectiles) {
-      if (p.fromPlayer) {
+      if (p.type === 'bullet') {
         // Player bullet: small bright vertical line
         r.fillRect(p.x - 1, p.y - 3, 2, 6, '#88eeff');
         r.fillRect(p.x, p.y - 2, 1, 4, '#ffffff');
+      } else if (p.type === 'missile') {
+        // Missile: wider orange/yellow with trail
+        r.fillRect(p.x - 1.5, p.y - 2, 3, 5, '#ffaa22');
+        r.fillRect(p.x - 0.5, p.y - 1, 1, 3, '#ffee88');
+        // Smoke trail
+        r.fillRect(p.x - 1, p.y + 3, 2, 2, 'rgba(200,200,200,0.4)');
       } else {
         // Enemy bullet: small red dot
         r.fillRect(p.x - 1.5, p.y - 1.5, 3, 3, '#ff6644');
@@ -599,36 +659,66 @@ export class IsometricMode implements GameMode {
     this.respawnTimer = 0;
     this.invincibleTimer = 2.0;
     this.projectiles = [];
+    this.boosting = false;
+    this.boostFuel = BOOST_FUEL_MAX;
+    this.camera.scrollSpeed = this.baseScrollSpeed;
     this.camera.resume();
   }
 
   // ── HUD ───────────────────────────────────────────────────────
 
   private renderHUD(r: Renderer): void {
+    // Top bar
     r.fillRect(0, 0, this.screenWidth, 14, 'rgba(0,0,0,0.6)');
     r.drawText(`M${this.mission.id}: ${this.mission.name}`, 4, 10, '#88aacc', 8);
     r.drawText(`SCORE: ${this.gameState.score}`, 170, 10, '#cccccc', 8);
 
+    // Bottom bar
     r.fillRect(0, this.screenHeight - 18, this.screenWidth, 18, 'rgba(0,0,0,0.6)');
     r.drawText(`LIVES: ${this.gameState.lives}`, 4, this.screenHeight - 8, '#cccccc', 8);
 
-    const altLabel = `ALT: ${this.playerAltitude.toFixed(1)}`;
-    r.drawText(altLabel, 80, this.screenHeight - 8, '#88cc88', 8);
-
     // Altitude bar
-    const barX = 135;
-    const barW = 40;
-    const barH = 6;
-    const barY = this.screenHeight - 13;
-    r.strokeRect(barX, barY, barW, barH, '#446644', 1);
-    r.fillRect(barX, barY, (this.playerAltitude / PLAYER_MAX_ALTITUDE) * barW, barH, '#88cc88');
+    const altBarX = 62;
+    const altBarW = 30;
+    const barH = 5;
+    const barY = this.screenHeight - 12;
+    r.drawText('ALT', 47, this.screenHeight - 8, '#88cc88', 7);
+    r.strokeRect(altBarX, barY, altBarW, barH, '#446644', 1);
+    r.fillRect(altBarX, barY, (this.playerAltitude / PLAYER_MAX_ALTITUDE) * altBarW, barH, '#88cc88');
+
+    // Missile cooldown indicator
+    const mslReady = this.missileCooldown <= 0;
+    const mslColor = mslReady ? '#ffaa22' : '#554422';
+    r.drawText('MSL', 100, this.screenHeight - 8, mslColor, 7);
+    if (!mslReady) {
+      const mslBarX = 118;
+      const mslPct = 1 - this.missileCooldown / MISSILE_COOLDOWN;
+      r.strokeRect(mslBarX, barY, altBarW, barH, '#443322', 1);
+      r.fillRect(mslBarX, barY, mslPct * altBarW, barH, '#886633');
+    } else {
+      r.drawText('RDY', 118, this.screenHeight - 8, '#ffaa22', 7);
+    }
+
+    // Boost fuel gauge
+    const boostColor = this.boosting ? '#44ddff' : '#447788';
+    r.drawText('BST', 155, this.screenHeight - 8, boostColor, 7);
+    const bstBarX = 173;
+    const bstBarW = 30;
+    r.strokeRect(bstBarX, barY, bstBarW, barH, '#334455', 1);
+    r.fillRect(bstBarX, barY, this.boostFuel * bstBarW, barH, this.boosting ? '#44ddff' : '#447788');
 
     // Progress
     r.drawText(`${Math.floor(this.camera.progress * 100)}%`, this.screenWidth - 30, this.screenHeight - 8, '#888888', 8);
 
+    // Boost screen effect
+    if (this.boosting) {
+      r.fillRect(0, 0, this.screenWidth, 2, 'rgba(68,221,255,0.15)');
+      r.fillRect(0, this.screenHeight - 2, this.screenWidth, 2, 'rgba(68,221,255,0.15)');
+    }
+
     // Controls hint
     if (this.camera.scrollY < 5) {
-      r.drawText('LEFT/RIGHT: Move   UP/DOWN: Altitude   A: Fire', 4, this.screenHeight - 26, '#556677', 8);
+      r.drawText('A:Fire  B:Missile  C:Boost  D-Pad:Move+Alt', 8, this.screenHeight - 26, '#556677', 8);
     }
   }
 
