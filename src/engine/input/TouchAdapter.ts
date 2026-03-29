@@ -12,9 +12,8 @@
  */
 
 import type { InputAdapter } from './InputAdapter';
-import type { GameAction } from './InputMap';
-import type { TouchOverlayLayout, TouchButtonDef } from './TouchLayout';
-import { TouchOverlayRenderer, type OverlayElements } from './TouchOverlayRenderer';
+import type { TouchOverlayLayout } from './TouchLayout';
+import { TouchOverlayRenderer } from './TouchOverlayRenderer';
 
 interface ActiveTouch {
   id: number;
@@ -121,12 +120,6 @@ export class TouchAdapter implements InputAdapter {
       const t = e.changedTouches[i];
       const target = this.hitTest(t.clientX, t.clientY);
 
-      // Tap in center gap → reveal start/select
-      if (target === 'center_tap') {
-        this.renderer.revealCenter();
-        continue;
-      }
-
       this.activeTouches.set(t.identifier, {
         id: t.identifier,
         target,
@@ -195,32 +188,8 @@ export class TouchAdapter implements InputAdapter {
 
     if (closestBtn) return closestBtn;
 
-    // Check center gap — if visible, check start/select directly
-    // If not visible, a tap here reveals them
-    const screenW = window.innerWidth;
-    const centerZoneLeft = screenW * 0.3;
-    const centerZoneRight = screenW * 0.7;
-    const centerZoneTop = window.innerHeight * 0.7;
-
-    if (cx > centerZoneLeft && cx < centerZoneRight && cy > centerZoneTop) {
-      if (this.renderer.isCenterVisible) {
-        // Check start/select buttons specifically
-        for (const id of ['start', 'select']) {
-          const el = els.buttons.get(id);
-          if (!el) continue;
-          const rect = el.getBoundingClientRect();
-          const bCx = rect.left + rect.width / 2;
-          const bCy = rect.top + rect.height / 2;
-          const bR = Math.max(rect.width, rect.height) / 2 * 1.5;
-          const dx = cx - bCx;
-          const dy = cy - bCy;
-          if (Math.sqrt(dx * dx + dy * dy) < bR) return id;
-        }
-      }
-      return 'center_tap';
-    }
-
     // Fallback: left 40% → dpad
+    const screenW = window.innerWidth;
     if (cx < screenW * 0.4) return 'dpad';
 
     return 'none';

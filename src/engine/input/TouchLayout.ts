@@ -53,7 +53,7 @@ export const DEFAULT_TOUCH_LAYOUT: TouchOverlayLayout = {
   buttons: [
     { id: 'btnB', action: 'altFire',  nx: 0.75, ny: 0.75, radius: 0.045, label: 'B', shape: 'circle' },
     { id: 'btnA', action: 'fire',     nx: 0.87, ny: 0.68, radius: 0.045, label: 'A', shape: 'circle' },
-    { id: 'start',  action: 'pause',   nx: 0.55, ny: 0.94, radius: 0.03,  label: 'START',  shape: 'rect', width: 0.09, height: 0.035 },
+    { id: 'start',  action: ['pause', 'confirm'],  nx: 0.55, ny: 0.94, radius: 0.03,  label: 'START',  shape: 'rect', width: 0.09, height: 0.035 },
     { id: 'select', action: 'cancel',  nx: 0.40, ny: 0.94, radius: 0.03,  label: 'SELECT', shape: 'rect', width: 0.09, height: 0.035 },
     { id: 'special', action: 'special', nx: 0.87, ny: 0.55, radius: 0.035, label: 'C', shape: 'circle' },
   ],

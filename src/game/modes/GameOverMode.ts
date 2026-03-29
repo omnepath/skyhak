@@ -23,7 +23,8 @@ export class GameOverMode implements GameMode {
     this.time += dt;
 
     // Return to title after input or timeout
-    if (this.time > 2.0 && (engine.input.isPressed('confirm') || engine.input.isPressed('fire'))) {
+    const anyStart = engine.input.isPressed('confirm') || engine.input.isPressed('fire') || engine.input.isPressed('pause');
+    if (this.time > 2.0 && anyStart) {
       engine.setMode('title');
     }
     if (this.time > 10.0) {
@@ -46,7 +47,7 @@ export class GameOverMode implements GameMode {
     r.drawText(`MISSION: ${this.gameState.currentMission + 1}`, 90, h / 2 + 40, `rgba(150,150,150,${fadeAlpha})`, 8);
 
     if (this.time > 2.0 && Math.floor(this.time * 2) % 2 === 0) {
-      r.drawText('PRESS ENTER', 85, h - 40, '#666666', 8);
+      r.drawText('PRESS START', 85, h - 40, '#666666', 8);
     }
   }
 
