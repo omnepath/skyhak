@@ -36,8 +36,6 @@ export class TouchOverlayRenderer {
   private buttonEls = new Map<string, HTMLElement>();
 
   private activeIds = new Set<string>();
-  private centerRevealTimer: ReturnType<typeof setTimeout> | null = null;
-  private centerVisible = false;
 
   constructor(layout: TouchOverlayLayout) {
     this.layout = layout;
@@ -52,10 +50,6 @@ export class TouchOverlayRenderer {
     if (this.root) {
       this.root.remove();
       this.root = null;
-    }
-    if (this.centerRevealTimer) {
-      clearTimeout(this.centerRevealTimer);
-      this.centerRevealTimer = null;
     }
     this.dpadDirs.clear();
     this.buttonEls.clear();
@@ -97,26 +91,6 @@ export class TouchOverlayRenderer {
       const active = this.activeIds.has(id);
       el.style.opacity = String(active ? alpha * 0.8 : alpha * 0.3);
     }
-  }
-
-  /** Reveal center buttons (start/select) briefly on tap */
-  revealCenter(): void {
-    if (!this.centerContainer) return;
-    this.centerVisible = true;
-    this.centerContainer.style.opacity = String(this.layout.opacity * 0.6);
-    this.centerContainer.style.pointerEvents = 'none';
-
-    if (this.centerRevealTimer) clearTimeout(this.centerRevealTimer);
-    this.centerRevealTimer = setTimeout(() => {
-      if (this.centerContainer) {
-        this.centerContainer.style.opacity = '0';
-      }
-      this.centerVisible = false;
-    }, 3000);
-  }
-
-  get isCenterVisible(): boolean {
-    return this.centerVisible;
   }
 
   // ── DOM construction ────────────────────────────────────
@@ -277,7 +251,7 @@ export class TouchOverlayRenderer {
   private buildCenterButtons(): void {
     if (!this.root) return;
 
-    // Center container for start/select — hidden by default, tap to reveal
+    // Center container for start/select — always visible at bottom center
     this.centerContainer = document.createElement('div');
     this.centerContainer.className = 'touch-center-container';
     Object.assign(this.centerContainer.style, {
@@ -287,8 +261,6 @@ export class TouchOverlayRenderer {
       transform: 'translateX(-50%)',
       display: 'flex',
       gap: '3vmin',
-      opacity: '0',
-      transition: 'opacity 0.3s ease',
       pointerEvents: 'none',
     });
 
@@ -310,6 +282,7 @@ export class TouchOverlayRenderer {
         fontFamily: 'monospace',
         fontWeight: 'bold',
         letterSpacing: '0.1em',
+        opacity: String(this.layout.opacity * 0.5),
         pointerEvents: 'none',
         userSelect: 'none',
       });
