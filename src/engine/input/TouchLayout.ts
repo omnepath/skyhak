@@ -42,7 +42,18 @@ export interface TouchOverlayLayout {
   opacity: number;
 }
 
-/** Default classic layout: D-pad left, A/B right, Start/Select center-bottom */
+/**
+ * Default SNES-style layout:
+ *
+ * D-pad left, action diamond right, bumpers above clusters,
+ * Start/Select center-bottom (Start on right).
+ *
+ * Right cluster diamond:
+ *         X
+ *     Y       A
+ *         B
+ * Plus C above-right.
+ */
 export const DEFAULT_TOUCH_LAYOUT: TouchOverlayLayout = {
   dpad: {
     nx: 0.15,
@@ -51,11 +62,19 @@ export const DEFAULT_TOUCH_LAYOUT: TouchOverlayLayout = {
     deadZone: 0.25,
   },
   buttons: [
-    { id: 'btnB', action: 'altFire',  nx: 0.75, ny: 0.75, radius: 0.045, label: 'B', shape: 'circle' },
+    // SNES diamond — right cluster
     { id: 'btnA', action: 'fire',     nx: 0.87, ny: 0.68, radius: 0.045, label: 'A', shape: 'circle' },
-    { id: 'start',  action: ['pause', 'confirm'],  nx: 0.55, ny: 0.94, radius: 0.03,  label: 'START',  shape: 'rect', width: 0.09, height: 0.035 },
-    { id: 'select', action: 'cancel',  nx: 0.40, ny: 0.94, radius: 0.03,  label: 'SELECT', shape: 'rect', width: 0.09, height: 0.035 },
-    { id: 'special', action: 'special', nx: 0.87, ny: 0.55, radius: 0.035, label: 'C', shape: 'circle' },
+    { id: 'btnB', action: 'altFire',  nx: 0.78, ny: 0.78, radius: 0.045, label: 'B', shape: 'circle' },
+    { id: 'btnX', action: 'actionX',  nx: 0.78, ny: 0.58, radius: 0.045, label: 'X', shape: 'circle' },
+    { id: 'btnY', action: 'actionY',  nx: 0.69, ny: 0.68, radius: 0.045, label: 'Y', shape: 'circle' },
+    // C button — above-right of diamond
+    { id: 'special', action: 'special', nx: 0.90, ny: 0.52, radius: 0.035, label: 'C', shape: 'circle' },
+    // Bumpers — above each cluster
+    { id: 'bumperL', action: 'bumperL', nx: 0.15, ny: 0.48, radius: 0.035, label: 'L', shape: 'rect', width: 0.10, height: 0.04 },
+    { id: 'bumperR', action: 'bumperR', nx: 0.85, ny: 0.42, radius: 0.035, label: 'R', shape: 'rect', width: 0.10, height: 0.04 },
+    // Center — Select left, Start right
+    { id: 'select', action: 'cancel',              nx: 0.40, ny: 0.94, radius: 0.03, label: 'SELECT', shape: 'rect', width: 0.09, height: 0.035 },
+    { id: 'start',  action: ['pause', 'confirm'],  nx: 0.55, ny: 0.94, radius: 0.03, label: 'START',  shape: 'rect', width: 0.09, height: 0.035 },
   ],
   opacity: 0.5,
 };

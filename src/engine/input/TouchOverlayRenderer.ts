@@ -282,25 +282,33 @@ export class TouchOverlayRenderer {
     if (!this.root) return;
 
     // Buttons container — anchored bottom-right, raised above corner UI
+    // Expanded height to fit SNES diamond + C button
     this.buttonsContainer = document.createElement('div');
     this.buttonsContainer.className = 'touch-buttons-container';
     Object.assign(this.buttonsContainer.style, {
       position: 'fixed',
       bottom: '14vmin',
       right: '3vmin',
-      width: '30vmin',
-      height: '30vmin',
+      width: '32vmin',
+      height: '38vmin',
       pointerEvents: 'none',
     });
 
     const actionButtons = this.layout.buttons.filter(
-      (b) => b.id !== 'start' && b.id !== 'select',
+      (b) => b.id !== 'start' && b.id !== 'select' && b.id !== 'bumperL' && b.id !== 'bumperR',
     );
 
+    // SNES diamond layout within container:
+    //         X (top)
+    //     Y (left)  A (right)
+    //         B (bottom)
+    // C above-right, small
     const btnPositions: Record<string, { right: string; bottom: string; size: string }> = {
-      btnA: { right: '2vmin', bottom: '8vmin', size: '11vmin' },
-      btnB: { right: '15vmin', bottom: '3vmin', size: '11vmin' },
-      special: { right: '2vmin', bottom: '20vmin', size: '9vmin' },
+      btnA:    { right: '2vmin',  bottom: '12vmin', size: '11vmin' },  // right of diamond
+      btnB:    { right: '12vmin', bottom: '4vmin',  size: '11vmin' },  // bottom of diamond
+      btnX:    { right: '12vmin', bottom: '20vmin', size: '11vmin' },  // top of diamond
+      btnY:    { right: '22vmin', bottom: '12vmin', size: '11vmin' },  // left of diamond
+      special: { right: '1vmin',  bottom: '28vmin', size: '8vmin' },   // C — above-right
     };
 
     for (const btn of actionButtons) {
@@ -311,29 +319,28 @@ export class TouchOverlayRenderer {
       el.className = `touch-btn touch-btn-${btn.id}`;
       el.dataset.btnId = btn.id;
 
-      if (btn.shape === 'circle') {
-        Object.assign(el.style, {
-          position: 'absolute',
-          right: pos.right,
-          bottom: pos.bottom,
-          width: pos.size,
-          height: pos.size,
-          borderRadius: '50%',
-          border: '2px solid rgba(255,255,255,0.4)',
-          background: 'rgba(255,255,255,0.08)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'white',
-          fontSize: btn.id === 'special' ? '2.8vmin' : '3.5vmin',
-          fontFamily: 'monospace',
-          fontWeight: 'bold',
-          opacity: String(this.layout.opacity * 0.6),
-          transition: 'opacity 0.08s ease, box-shadow 0.15s ease, background 0.08s ease, border-color 0.08s ease',
-          pointerEvents: 'none',
-          userSelect: 'none',
-        });
-      }
+      const isSmall = btn.id === 'special';
+      Object.assign(el.style, {
+        position: 'absolute',
+        right: pos.right,
+        bottom: pos.bottom,
+        width: pos.size,
+        height: pos.size,
+        borderRadius: '50%',
+        border: '2px solid rgba(255,255,255,0.4)',
+        background: 'rgba(255,255,255,0.08)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'white',
+        fontSize: isSmall ? '2.5vmin' : '3.5vmin',
+        fontFamily: 'monospace',
+        fontWeight: 'bold',
+        opacity: String(this.layout.opacity * 0.6),
+        transition: 'opacity 0.08s ease, box-shadow 0.15s ease, background 0.08s ease, border-color 0.08s ease',
+        pointerEvents: 'none',
+        userSelect: 'none',
+      });
 
       el.textContent = btn.label;
       this.buttonsContainer.appendChild(el);
@@ -341,6 +348,46 @@ export class TouchOverlayRenderer {
     }
 
     this.root.appendChild(this.buttonsContainer);
+
+    // Bumper buttons — positioned above each cluster
+    this.buildBumpers();
+  }
+
+  private buildBumpers(): void {
+    if (!this.root) return;
+
+    const bumpers = this.layout.buttons.filter(
+      (b) => b.id === 'bumperL' || b.id === 'bumperR',
+    );
+
+    for (const btn of bumpers) {
+      const el = document.createElement('div');
+      el.className = `touch-btn touch-btn-bumper touch-btn-${btn.id}`;
+      el.dataset.btnId = btn.id;
+
+      const isLeft = btn.id === 'bumperL';
+      Object.assign(el.style, {
+        position: 'fixed',
+        bottom: isLeft ? '44vmin' : '54vmin',
+        [isLeft ? 'left' : 'right']: '5vmin',
+        padding: '1.5vmin 4vmin',
+        borderRadius: '2vmin',
+        border: '2px solid rgba(255,255,255,0.35)',
+        background: 'rgba(255,255,255,0.06)',
+        color: 'white',
+        fontSize: '2.8vmin',
+        fontFamily: 'monospace',
+        fontWeight: 'bold',
+        opacity: String(this.layout.opacity * 0.6),
+        transition: 'opacity 0.08s ease, box-shadow 0.15s ease, background 0.08s ease, border-color 0.08s ease',
+        pointerEvents: 'none',
+        userSelect: 'none',
+      });
+
+      el.textContent = btn.label;
+      this.root.appendChild(el);
+      this.buttonEls.set(btn.id, el);
+    }
   }
 
   private buildCenterButtons(): void {
