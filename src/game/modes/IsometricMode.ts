@@ -1,32 +1,33 @@
 /**
  * Isometric flight mode — the primary gameplay of Captain Skyhawk.
  *
- * Player pilots the F-14VTS over scrolling isometric terrain,
- * avoiding mountains by adjusting horizontal position and altitude.
- * Terrain auto-scrolls forward. Crashing into terrain = death.
+ * Player pilots the F-14VTS over scrolling terrain, avoiding mountains
+ * by adjusting horizontal position and altitude. Enemies spawn and fire.
  *
- * Enemies spawn at predefined terrain rows and fire projectiles.
- * Player fires forward with the A button.
+ * This mode owns all game logic (movement, combat, collision, explosions).
+ * Rendering is delegated to the active FlightView (isometric or first-person).
+ * Press Select to toggle views.
  */
 
 import type { EngineAPI, GameMode } from '../../engine/interfaces';
-import type { Renderer } from '../../engine/render/Renderer';
 import { clamp } from '../../engine/math/MathUtils';
 import { IsometricCamera } from '../isometric/IsometricCamera';
-import { TerrainRenderer } from '../isometric/TerrainRenderer';
 import { TerrainCollision } from '../isometric/TerrainCollision';
 import type { GameState } from '../GameState';
 import type { MissionDef } from '../data/levels';
 import { MISSIONS } from '../data/levels';
-import type { TerrainData } from '../data/terrain';
-import { TERRAIN_TILE_W, TERRAIN_COLS, generateTerrain, LEVEL_TERRAIN_CONFIGS } from '../data/terrain';
-import { getPalette, type LevelPalette } from '../data/palettes';
+import { TERRAIN_TILE_W, TERRAIN_TILE_H, TERRAIN_COLS, generateTerrain, LEVEL_TERRAIN_CONFIGS } from '../data/terrain';
+import { getPalette } from '../data/palettes';
 import type { Projectile, Enemy } from '../entities/Entities';
 import {
   ENEMY_DEFS, PLAYER_BULLET_SPEED, PLAYER_FIRE_COOLDOWN, PROJECTILE_LIFETIME,
   MISSILE_SPREAD_COUNT, MISSILE_SPEED, MISSILE_SPREAD_ANGLE, MISSILE_COOLDOWN, MISSILE_LIFETIME,
   BOOST_FUEL_MAX, BOOST_BURN_RATE, BOOST_RECHARGE_RATE, BOOST_SPEED_MULTIPLIER, BOOST_MIN_FUEL,
 } from '../entities/Entities';
+import { FlightState } from '../flight/FlightState';
+import type { FlightView } from '../flight/FlightView';
+import { IsometricView } from '../flight/IsometricView';
+import { FirstPersonView } from '../flight/FirstPersonView';
 
 // Player constants
 const PLAYER_SCREEN_Y = 200;
@@ -35,111 +36,83 @@ const PLAYER_ALTITUDE_SPEED = 3;
 const PLAYER_MIN_ALTITUDE = 0;
 const PLAYER_MAX_ALTITUDE = 4;
 const PLAYER_WIDTH = 14;
-const JET_WIDTH = 16;
 const JET_HEIGHT = 16;
 
 const EXPLOSION_DURATION = 1.5;
 const RESPAWN_DELAY = 2.0;
 
-interface ExplosionParticle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
-}
-
 export class IsometricMode implements GameMode {
   readonly id = 'isometric';
 
   private gameState: GameState;
-  private camera!: IsometricCamera;
-  private terrainRenderer!: TerrainRenderer;
+  private state: FlightState;
   private terrainCollision!: TerrainCollision;
-  private terrain!: TerrainData;
-  private palette!: LevelPalette;
-  private mission!: MissionDef;
 
-  private playerX = 128;
-  private prevPlayerX = 128;
-  private playerAltitude = 2;
-  private prevAltitude = 2;
-  private alive = true;
-  private invincibleTimer = 0;
-
-  private exploding = false;
-  private explosionTimer = 0;
-  private explosionParticles: ExplosionParticle[] = [];
-  private respawnTimer = 0;
-
-  private levelComplete = false;
-  private levelCompleteTimer = 0;
-
-  private screenWidth = 256;
-  private screenHeight = 240;
-  private terrainOffsetX = 0;
-  private engineTime = 0;
-
-  // Combat
-  private projectiles: Projectile[] = [];
-  private enemies: Enemy[] = [];
-  private playerFireCooldown = 0;
-  private missileCooldown = 0;
-
-  // Boost
-  private boostFuel = BOOST_FUEL_MAX;
-  private boosting = false;
-  private baseScrollSpeed = 0;
+  // Views
+  private isoView = new IsometricView();
+  private fpvView = new FirstPersonView();
+  private activeView: FlightView;
 
   constructor(gameState: GameState) {
     this.gameState = gameState;
+    this.state = new FlightState(gameState);
+    this.activeView = this.isoView;
   }
 
   enter(engine: EngineAPI): void {
-    this.screenWidth = engine.config.width;
-    this.screenHeight = engine.config.height;
+    const s = this.state;
+    s.screenWidth = engine.config.width;
+    s.screenHeight = engine.config.height;
 
     const missionIndex = this.gameState.currentMission;
-    this.mission = MISSIONS[missionIndex] ?? MISSIONS[0];
+    s.mission = MISSIONS[missionIndex] ?? MISSIONS[0];
 
-    const terrainConfig = LEVEL_TERRAIN_CONFIGS[this.mission.terrainConfigIndex] ?? LEVEL_TERRAIN_CONFIGS[0];
-    this.terrain = generateTerrain(terrainConfig.length, terrainConfig.seed, terrainConfig.difficulty);
-    this.palette = getPalette(this.mission.paletteIndex);
+    const terrainConfig = LEVEL_TERRAIN_CONFIGS[s.mission.terrainConfigIndex] ?? LEVEL_TERRAIN_CONFIGS[0];
+    s.terrain = generateTerrain(terrainConfig.length, terrainConfig.seed, terrainConfig.difficulty);
+    s.palette = getPalette(s.mission.paletteIndex);
 
-    this.camera = new IsometricCamera(this.screenHeight, this.terrain.rows.length, this.mission.scrollSpeed);
-    this.terrainRenderer = new TerrainRenderer(this.terrain, this.palette, this.screenWidth);
-    this.terrainCollision = new TerrainCollision(this.terrain, this.screenWidth);
-    this.terrainOffsetX = (this.screenWidth - TERRAIN_COLS * TERRAIN_TILE_W) / 2;
+    s.camera = new IsometricCamera(s.screenHeight, s.terrain.rows.length, s.mission.scrollSpeed);
+    this.terrainCollision = new TerrainCollision(s.terrain, s.screenWidth);
+    s.updateTerrainOffset();
 
-    this.playerX = this.screenWidth / 2;
-    this.prevPlayerX = this.playerX;
-    this.playerAltitude = this.gameState.altitude;
-    this.prevAltitude = this.playerAltitude;
-    this.alive = true;
-    this.exploding = false;
-    this.levelComplete = false;
-    this.levelCompleteTimer = 0;
-    this.invincibleTimer = 2.0;
+    s.playerX = s.screenWidth / 2;
+    s.prevPlayerX = s.playerX;
+    s.playerAltitude = this.gameState.altitude;
+    s.prevAltitude = s.playerAltitude;
+    s.alive = true;
+    s.exploding = false;
+    s.levelComplete = false;
+    s.levelCompleteTimer = 0;
+    s.invincibleTimer = 2.0;
 
     // Combat reset
-    this.projectiles = [];
-    this.enemies = [];
-    this.playerFireCooldown = 0;
-    this.missileCooldown = 0;
-    this.boostFuel = BOOST_FUEL_MAX;
-    this.boosting = false;
-    this.baseScrollSpeed = this.mission.scrollSpeed;
+    s.projectiles = [];
+    s.enemies = [];
+    s.playerFireCooldown = 0;
+    s.missileCooldown = 0;
+    s.boostFuel = BOOST_FUEL_MAX;
+    s.boosting = false;
+    s.baseScrollSpeed = s.mission.scrollSpeed;
     this.spawnEnemies();
+
+    // Activate current view
+    this.activeView.activate(s);
   }
 
   update(engine: EngineAPI, dt: number): void {
-    if (this.levelComplete) {
-      this.levelCompleteTimer += dt;
-      if (this.levelCompleteTimer > 3.0) {
-        if (this.mission.hasDogfight) {
+    const s = this.state;
+
+    // View toggle on Select press
+    if (engine.input.isPressed('select')) {
+      this.toggleView();
+    }
+
+    if (s.levelComplete) {
+      s.levelCompleteTimer += dt;
+      if (s.levelCompleteTimer > 3.0) {
+        if (s.mission.hasDogfight) {
           engine.setMode('dogfight');
-        } else if (this.mission.hasDocking) {
+        } else if (s.mission.hasDocking) {
           engine.setMode('docking');
         } else {
           engine.setMode('title');
@@ -148,75 +121,69 @@ export class IsometricMode implements GameMode {
       return;
     }
 
-    if (this.exploding) {
+    if (s.exploding) {
       this.updateExplosion(engine, dt);
       return;
     }
 
-    this.prevPlayerX = this.playerX;
-    this.prevAltitude = this.playerAltitude;
+    s.prevPlayerX = s.playerX;
+    s.prevAltitude = s.playerAltitude;
 
     const input = engine.input;
-    if (input.isHeld('dpadLeft'))  this.playerX -= PLAYER_SPEED_X * dt;
-    if (input.isHeld('dpadRight')) this.playerX += PLAYER_SPEED_X * dt;
-    if (input.isHeld('dpadUp'))    this.playerAltitude += PLAYER_ALTITUDE_SPEED * dt;
-    if (input.isHeld('dpadDown'))  this.playerAltitude -= PLAYER_ALTITUDE_SPEED * dt;
+    if (input.isHeld('dpadLeft'))  s.playerX -= PLAYER_SPEED_X * dt;
+    if (input.isHeld('dpadRight')) s.playerX += PLAYER_SPEED_X * dt;
+    if (input.isHeld('dpadUp'))    s.playerAltitude += PLAYER_ALTITUDE_SPEED * dt;
+    if (input.isHeld('dpadDown'))  s.playerAltitude -= PLAYER_ALTITUDE_SPEED * dt;
 
-    const minX = this.terrainOffsetX + JET_WIDTH / 2;
-    const maxX = this.terrainOffsetX + TERRAIN_COLS * TERRAIN_TILE_W - JET_WIDTH / 2;
-    this.playerX = clamp(this.playerX, minX, maxX);
-    this.playerAltitude = clamp(this.playerAltitude, PLAYER_MIN_ALTITUDE, PLAYER_MAX_ALTITUDE);
+    const minX = s.terrainOffsetX + JET_HEIGHT / 2;
+    const maxX = s.terrainOffsetX + TERRAIN_COLS * TERRAIN_TILE_W - JET_HEIGHT / 2;
+    s.playerX = clamp(s.playerX, minX, maxX);
+    s.playerAltitude = clamp(s.playerAltitude, PLAYER_MIN_ALTITUDE, PLAYER_MAX_ALTITUDE);
 
     // Player fire (A button)
-    this.playerFireCooldown = Math.max(0, this.playerFireCooldown - dt);
-    if (input.isHeld('A') && this.playerFireCooldown <= 0) {
+    s.playerFireCooldown = Math.max(0, s.playerFireCooldown - dt);
+    if (input.isHeld('A') && s.playerFireCooldown <= 0) {
       this.spawnPlayerBullet();
-      this.playerFireCooldown = PLAYER_FIRE_COOLDOWN;
+      s.playerFireCooldown = PLAYER_FIRE_COOLDOWN;
     }
 
     // Missile spread (B button)
-    this.missileCooldown = Math.max(0, this.missileCooldown - dt);
-    if (input.isPressed('B') && this.missileCooldown <= 0) {
+    s.missileCooldown = Math.max(0, s.missileCooldown - dt);
+    if (input.isPressed('B') && s.missileCooldown <= 0) {
       this.spawnMissileSpread();
-      this.missileCooldown = MISSILE_COOLDOWN;
+      s.missileCooldown = MISSILE_COOLDOWN;
     }
 
-    // Boost (C button) — hold to burn, release to recharge
-    this.boosting = input.isHeld('C') && this.boostFuel > BOOST_MIN_FUEL;
-    if (this.boosting) {
-      this.boostFuel = Math.max(0, this.boostFuel - BOOST_BURN_RATE * dt);
-      this.camera.scrollSpeed = this.baseScrollSpeed * BOOST_SPEED_MULTIPLIER;
-      if (this.boostFuel <= 0) this.boosting = false;
+    // Boost (C button)
+    s.boosting = input.isHeld('C') && s.boostFuel > BOOST_MIN_FUEL;
+    if (s.boosting) {
+      s.boostFuel = Math.max(0, s.boostFuel - BOOST_BURN_RATE * dt);
+      s.camera.scrollSpeed = s.baseScrollSpeed * BOOST_SPEED_MULTIPLIER;
+      if (s.boostFuel <= 0) s.boosting = false;
     } else {
-      this.boostFuel = Math.min(BOOST_FUEL_MAX, this.boostFuel + BOOST_RECHARGE_RATE * dt);
-      this.camera.scrollSpeed = this.baseScrollSpeed;
+      s.boostFuel = Math.min(BOOST_FUEL_MAX, s.boostFuel + BOOST_RECHARGE_RATE * dt);
+      s.camera.scrollSpeed = s.baseScrollSpeed;
     }
 
-    this.camera.update(dt);
+    s.camera.update(dt);
 
-    // Update enemies
     this.updateEnemies(dt);
-
-    // Update projectiles
     this.updateProjectiles(dt);
-
-    // Collision: player projectiles vs enemies
     this.checkPlayerBulletHits();
 
-    // Collision: enemy projectiles vs player
-    if (this.invincibleTimer <= 0) {
+    if (s.invincibleTimer <= 0) {
       this.checkEnemyBulletHits();
     }
 
-    if (this.invincibleTimer > 0) {
-      this.invincibleTimer -= dt;
+    if (s.invincibleTimer > 0) {
+      s.invincibleTimer -= dt;
     }
 
     // Terrain collision
-    if (this.invincibleTimer <= 0) {
-      const playerRow = this.camera.screenYToRow(PLAYER_SCREEN_Y);
+    if (s.invincibleTimer <= 0) {
+      const playerRow = s.camera.screenYToRow(PLAYER_SCREEN_Y);
       const collision = this.terrainCollision.check(
-        this.playerX, playerRow, this.playerAltitude, PLAYER_WIDTH,
+        s.playerX, playerRow, s.playerAltitude, PLAYER_WIDTH,
       );
       if (collision.collided) {
         this.startExplosion();
@@ -224,86 +191,67 @@ export class IsometricMode implements GameMode {
       }
     }
 
-    if (this.camera.atEnd) {
-      this.levelComplete = true;
-      this.levelCompleteTimer = 0;
-      this.gameState.altitude = this.playerAltitude;
+    if (s.camera.atEnd) {
+      s.levelComplete = true;
+      s.levelCompleteTimer = 0;
+      this.gameState.altitude = s.playerAltitude;
     }
 
-    this.gameState.altitude = this.playerAltitude;
+    this.gameState.altitude = s.playerAltitude;
   }
 
   render(engine: EngineAPI, alpha: number): void {
-    const r = engine.renderer;
-    this.engineTime = engine.getTime();
-
-    r.clear(this.palette.background);
-    this.terrainRenderer.render(r, this.camera);
-
-    // Render enemies (behind player)
-    this.renderEnemies(r);
-
-    // Render projectiles
-    this.renderProjectiles(r);
-
-    if (this.alive && !this.exploding) {
-      this.renderPlayer(r, alpha);
-    }
-
-    if (this.exploding) {
-      this.renderExplosion(r);
-    }
-
-    this.renderHUD(r);
-
-    if (this.levelComplete) {
-      this.renderLevelComplete(r);
-    }
+    this.state.engineTime = engine.getTime();
+    this.activeView.render(engine.renderer, this.state, alpha);
+    this.activeView.renderHUD(engine.renderer, this.state);
   }
 
   exit(_engine: EngineAPI): void {
     // cleanup
   }
 
+  // ── View toggle ──────────────────────────────────────────────
+
+  private toggleView(): void {
+    if (this.activeView === this.isoView) {
+      this.activeView = this.fpvView;
+    } else {
+      this.activeView = this.isoView;
+    }
+    this.activeView.activate(this.state);
+  }
+
   // ── Enemy spawning ───────────────────────────────────────────
 
   private spawnEnemies(): void {
-    // Place turrets at regular intervals through the level in open terrain
-    const totalRows = this.terrain.rows.length;
+    const s = this.state;
+    const totalRows = s.terrain.rows.length;
     const spacing = Math.max(12, Math.floor(totalRows / 10));
 
     for (let i = spacing; i < totalRows - 10; i += spacing) {
-      const row = this.terrain.rows[i];
+      const row = s.terrain.rows[i];
       if (!row) continue;
 
-      // Find a flat column (height 0) in the middle area
       let bestCol = -1;
       for (let c = 2; c < TERRAIN_COLS - 2; c++) {
-        if (row[c] === 0) {
-          bestCol = c;
-          break;
-        }
+        if (row[c] === 0) { bestCol = c; break; }
       }
-      // Try from the other side too
       if (bestCol === -1) {
         for (let c = TERRAIN_COLS - 3; c >= 2; c--) {
-          if (row[c] === 0) {
-            bestCol = c;
-            break;
-          }
+          if (row[c] === 0) { bestCol = c; break; }
         }
       }
       if (bestCol === -1) continue;
 
-      const enemyX = this.terrainOffsetX + bestCol * TERRAIN_TILE_W + TERRAIN_TILE_W / 2;
+      const enemyX = s.terrainOffsetX + bestCol * TERRAIN_TILE_W + TERRAIN_TILE_W / 2;
 
-      this.enemies.push({
+      s.enemies.push({
         x: enemyX,
         row: i,
         altitude: 0,
         health: ENEMY_DEFS.turret.health,
         type: 'turret',
-        fireCooldown: 1.0 + Math.random() * 2.0, // stagger initial fire
+        fireCooldown: 1.0 + Math.random() * 2.0,
         active: false,
         dead: false,
       });
@@ -313,19 +261,18 @@ export class IsometricMode implements GameMode {
   // ── Enemy update ─────────────────────────────────────────────
 
   private updateEnemies(dt: number): void {
-    const visible = this.camera.getVisibleRows();
+    const s = this.state;
+    const visible = s.camera.getVisibleRows();
 
-    for (const enemy of this.enemies) {
+    for (const enemy of s.enemies) {
       if (enemy.dead) continue;
 
-      // Activate when scrolled into view (with a buffer)
       if (enemy.row >= visible.minRow && enemy.row <= visible.maxRow + 3) {
         enemy.active = true;
       }
 
       if (!enemy.active) continue;
 
-      // Fire at player
       const def = ENEMY_DEFS[enemy.type];
       enemy.fireCooldown -= dt;
       if (enemy.fireCooldown <= 0) {
@@ -333,24 +280,24 @@ export class IsometricMode implements GameMode {
         enemy.fireCooldown = def.fireRate + (Math.random() - 0.5) * 1.0;
       }
 
-      // Remove if scrolled well past the bottom of screen
-      const screenY = this.camera.rowToScreenY(enemy.row);
-      if (screenY > this.screenHeight + 50) {
+      const screenY = s.camera.rowToScreenY(enemy.row);
+      if (screenY > s.screenHeight + 50) {
         enemy.dead = true;
       }
     }
 
-    this.enemies = this.enemies.filter((e) => !e.dead);
+    s.enemies = s.enemies.filter((e) => !e.dead);
   }
 
   // ── Projectiles ──────────────────────────────────────────────
 
   private spawnPlayerBullet(): void {
-    const altOffset = this.playerAltitude * 3;
-    this.projectiles.push({
-      x: this.playerX,
+    const s = this.state;
+    const altOffset = s.playerAltitude * 3;
+    s.projectiles.push({
+      x: s.playerX,
       y: PLAYER_SCREEN_Y - altOffset - JET_HEIGHT / 2,
-      altitude: this.playerAltitude,
+      altitude: s.playerAltitude,
       vx: 0,
       vy: -PLAYER_BULLET_SPEED,
       fromPlayer: true,
@@ -360,18 +307,19 @@ export class IsometricMode implements GameMode {
   }
 
   private spawnMissileSpread(): void {
-    const altOffset = this.playerAltitude * 3;
+    const s = this.state;
+    const altOffset = s.playerAltitude * 3;
     const originY = PLAYER_SCREEN_Y - altOffset - JET_HEIGHT / 2;
     const halfSpread = MISSILE_SPREAD_ANGLE / 2;
 
     for (let i = 0; i < MISSILE_SPREAD_COUNT; i++) {
-      // Fan from -halfSpread to +halfSpread, centered on straight up (-PI/2)
-      const t = MISSILE_SPREAD_COUNT === 1 ? 0 : (i / (MISSILE_SPREAD_COUNT - 1)) * 2 - 1;
+      const count = MISSILE_SPREAD_COUNT;
+      const t = count <= 1 ? 0 : (i / (count - 1)) * 2 - 1;
       const angle = -Math.PI / 2 + t * halfSpread;
-      this.projectiles.push({
-        x: this.playerX,
+      s.projectiles.push({
+        x: s.playerX,
         y: originY,
-        altitude: this.playerAltitude,
+        altitude: s.playerAltitude,
         vx: Math.cos(angle) * MISSILE_SPEED,
         vy: Math.sin(angle) * MISSILE_SPEED,
         fromPlayer: true,
@@ -382,18 +330,18 @@ export class IsometricMode implements GameMode {
   }
 
   private spawnEnemyBullet(enemy: Enemy): void {
+    const s = this.state;
     const def = ENEMY_DEFS[enemy.type];
-    const screenY = this.camera.rowToScreenY(enemy.row);
+    const screenY = s.camera.rowToScreenY(enemy.row);
     const altOffset = enemy.altitude * 3;
 
-    // Aim loosely toward player position
-    const dx = this.playerX - enemy.x;
+    const dx = s.playerX - enemy.x;
     const dy = PLAYER_SCREEN_Y - screenY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 1) return;
 
     const speed = def.projectileSpeed;
-    this.projectiles.push({
+    s.projectiles.push({
       x: enemy.x,
       y: screenY - altOffset,
       altitude: enemy.altitude,
@@ -406,36 +354,37 @@ export class IsometricMode implements GameMode {
   }
 
   private updateProjectiles(dt: number): void {
-    for (const p of this.projectiles) {
+    const s = this.state;
+    for (const p of s.projectiles) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life -= dt;
     }
 
-    // Remove expired or off-screen
-    this.projectiles = this.projectiles.filter(
-      (p) => p.life > 0 && p.y > -20 && p.y < this.screenHeight + 20
-             && p.x > -20 && p.x < this.screenWidth + 20,
+    s.projectiles = s.projectiles.filter(
+      (p) => p.life > 0 && p.y > -20 && p.y < s.screenHeight + 20
+             && p.x > -20 && p.x < s.screenWidth + 20,
     );
   }
 
   private checkPlayerBulletHits(): void {
+    const s = this.state;
     const hitRadius = 10;
 
-    for (const p of this.projectiles) {
+    for (const p of s.projectiles) {
       if (!p.fromPlayer) continue;
 
-      for (const enemy of this.enemies) {
+      for (const enemy of s.enemies) {
         if (enemy.dead) continue;
 
-        const screenY = this.camera.rowToScreenY(enemy.row);
+        const screenY = s.camera.rowToScreenY(enemy.row);
         const dx = p.x - enemy.x;
         const dy = p.y - screenY;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist < hitRadius) {
           enemy.health--;
-          p.life = 0; // consume bullet
+          p.life = 0;
 
           if (enemy.health <= 0) {
             enemy.dead = true;
@@ -449,13 +398,14 @@ export class IsometricMode implements GameMode {
   }
 
   private checkEnemyBulletHits(): void {
+    const s = this.state;
     const hitRadius = 10;
-    const playerScreenY = PLAYER_SCREEN_Y - this.playerAltitude * 3;
+    const playerScreenY = PLAYER_SCREEN_Y - s.playerAltitude * 3;
 
-    for (const p of this.projectiles) {
+    for (const p of s.projectiles) {
       if (p.fromPlayer) continue;
 
-      const dx = p.x - this.playerX;
+      const dx = p.x - s.playerX;
       const dy = p.y - playerScreenY;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
@@ -467,73 +417,16 @@ export class IsometricMode implements GameMode {
     }
   }
 
-  // ── Rendering ────────────────────────────────────────────────
-
-  private renderEnemies(r: Renderer): void {
-    for (const enemy of this.enemies) {
-      if (enemy.dead || !enemy.active) continue;
-
-      const def = ENEMY_DEFS[enemy.type];
-      const screenY = this.camera.rowToScreenY(enemy.row);
-      if (screenY < -20 || screenY > this.screenHeight + 20) continue;
-
-      const s = def.size;
-      const altOff = enemy.altitude * 3;
-      const ey = screenY - altOff;
-
-      // Turret: diamond shape with a darker center
-      r.fillPoly([
-        { x: enemy.x, y: ey - s },
-        { x: enemy.x + s, y: ey },
-        { x: enemy.x, y: ey + s * 0.6 },
-        { x: enemy.x - s, y: ey },
-      ], def.color);
-
-      // Inner highlight
-      r.fillPoly([
-        { x: enemy.x, y: ey - s * 0.5 },
-        { x: enemy.x + s * 0.4, y: ey },
-        { x: enemy.x, y: ey + s * 0.3 },
-        { x: enemy.x - s * 0.4, y: ey },
-      ], '#ff8866');
-
-      // Health pip
-      if (enemy.health < ENEMY_DEFS[enemy.type].health) {
-        r.fillRect(enemy.x - 4, ey - s - 4, 8, 2, '#440000');
-        const hpPct = enemy.health / ENEMY_DEFS[enemy.type].health;
-        r.fillRect(enemy.x - 4, ey - s - 4, 8 * hpPct, 2, '#ff4444');
-      }
-    }
-  }
-
-  private renderProjectiles(r: Renderer): void {
-    for (const p of this.projectiles) {
-      if (p.type === 'bullet') {
-        // Player bullet: small bright vertical line
-        r.fillRect(p.x - 1, p.y - 3, 2, 6, '#88eeff');
-        r.fillRect(p.x, p.y - 2, 1, 4, '#ffffff');
-      } else if (p.type === 'missile') {
-        // Missile: wider orange/yellow with trail
-        r.fillRect(p.x - 1.5, p.y - 2, 3, 5, '#ffaa22');
-        r.fillRect(p.x - 0.5, p.y - 1, 1, 3, '#ffee88');
-        // Smoke trail
-        r.fillRect(p.x - 1, p.y + 3, 2, 2, 'rgba(200,200,200,0.4)');
-      } else {
-        // Enemy bullet: small red dot
-        r.fillRect(p.x - 1.5, p.y - 1.5, 3, 3, '#ff6644');
-        r.fillRect(p.x - 0.5, p.y - 0.5, 1, 1, '#ffcc88');
-      }
-    }
-  }
+  // ── Explosion ─────────────────────────────────────────────────
 
   private spawnSmallExplosion(x: number, y: number): void {
+    const s = this.state;
     const colors = ['#ff4400', '#ff8800', '#ffcc00', '#ffffff'];
     for (let i = 0; i < 8; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 20 + Math.random() * 50;
-      this.explosionParticles.push({
-        x,
-        y,
+      s.explosionParticles.push({
+        x, y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed - 15,
         life: 0.3 + Math.random() * 0.4,
@@ -542,73 +435,21 @@ export class IsometricMode implements GameMode {
     }
   }
 
-  // ── Player rendering ──────────────────────────────────────────
-
-  private renderPlayer(r: Renderer, alpha: number): void {
-    const px = this.prevPlayerX + (this.playerX - this.prevPlayerX) * alpha;
-    const alt = this.prevAltitude + (this.playerAltitude - this.prevAltitude) * alpha;
-    const altOffset = alt * 3;
-    const jetY = PLAYER_SCREEN_Y - altOffset;
-
-    // Invincibility blink
-    if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer * 10) % 2 === 0) {
-      return;
-    }
-
-    // Shadow
-    const shadowAlpha = Math.max(0.1, 0.4 - alt * 0.08);
-    const shadowScale = 1 + alt * 0.1;
-    r.fillPoly([
-      { x: px, y: PLAYER_SCREEN_Y - 3 },
-      { x: px + JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
-      { x: px, y: PLAYER_SCREEN_Y + 5 },
-      { x: px - JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
-    ], `rgba(0,0,0,${shadowAlpha})`);
-
-    // Jet body
-    r.fillPoly([
-      { x: px, y: jetY - JET_HEIGHT / 2 },
-      { x: px + JET_WIDTH / 2, y: jetY + 2 },
-      { x: px, y: jetY + JET_HEIGHT / 2 },
-      { x: px - JET_WIDTH / 2, y: jetY + 2 },
-    ], this.palette.playerJet);
-
-    // Cockpit
-    r.fillPoly([
-      { x: px, y: jetY - 4 },
-      { x: px + 3, y: jetY + 1 },
-      { x: px, y: jetY + 4 },
-      { x: px - 3, y: jetY + 1 },
-    ], this.palette.playerHighlight);
-
-    // Engine glow
-    const flicker = Math.sin(this.engineTime * 20) * 0.5 + 0.5;
-    r.fillRect(px - 2, jetY + JET_HEIGHT / 2 - 1, 4, 2 + flicker * 2, this.palette.playerEngine);
-
-    // Altitude tick marks on wings
-    for (let i = 0; i < Math.floor(alt); i++) {
-      const wy = jetY + 1 - i;
-      r.drawLine(px - 6, wy, px - 4, wy, '#ffffff', 1);
-      r.drawLine(px + 4, wy, px + 6, wy, '#ffffff', 1);
-    }
-  }
-
-  // ── Explosion ─────────────────────────────────────────────────
-
   private startExplosion(): void {
-    this.alive = false;
-    this.exploding = true;
-    this.explosionTimer = 0;
-    this.respawnTimer = 0;
-    this.camera.pause();
+    const s = this.state;
+    s.alive = false;
+    s.exploding = true;
+    s.explosionTimer = 0;
+    s.respawnTimer = 0;
+    s.camera.pause();
 
     const colors = ['#ff4400', '#ff8800', '#ffcc00', '#ffffff', '#ff2200'];
     for (let i = 0; i < 20; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 80;
-      this.explosionParticles.push({
-        x: this.playerX,
-        y: PLAYER_SCREEN_Y - this.playerAltitude * 3,
+      s.explosionParticles.push({
+        x: s.playerX,
+        y: PLAYER_SCREEN_Y - s.playerAltitude * 3,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed - 20,
         life: 0.5 + Math.random() * 1.0,
@@ -618,19 +459,20 @@ export class IsometricMode implements GameMode {
   }
 
   private updateExplosion(engine: EngineAPI, dt: number): void {
-    this.explosionTimer += dt;
+    const s = this.state;
+    s.explosionTimer += dt;
 
-    for (const p of this.explosionParticles) {
+    for (const p of s.explosionParticles) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.vy += 80 * dt;
       p.life -= dt;
     }
-    this.explosionParticles = this.explosionParticles.filter((p) => p.life > 0);
+    s.explosionParticles = s.explosionParticles.filter((p) => p.life > 0);
 
-    if (this.explosionTimer > EXPLOSION_DURATION) {
-      this.respawnTimer += dt;
-      if (this.respawnTimer > RESPAWN_DELAY) {
+    if (s.explosionTimer > EXPLOSION_DURATION) {
+      s.respawnTimer += dt;
+      if (s.respawnTimer > RESPAWN_DELAY) {
         const canContinue = this.gameState.loseLife();
         if (canContinue) {
           this.respawn();
@@ -641,90 +483,19 @@ export class IsometricMode implements GameMode {
     }
   }
 
-  private renderExplosion(r: Renderer): void {
-    for (const p of this.explosionParticles) {
-      const size = Math.max(1, 3 * (p.life / 1.0));
-      r.fillRect(p.x - size / 2, p.y - size / 2, size, size, p.color);
-    }
-  }
-
   private respawn(): void {
-    this.playerX = this.screenWidth / 2;
-    this.prevPlayerX = this.playerX;
-    this.playerAltitude = 2;
-    this.prevAltitude = 2;
-    this.alive = true;
-    this.exploding = false;
-    this.explosionTimer = 0;
-    this.respawnTimer = 0;
-    this.invincibleTimer = 2.0;
-    this.projectiles = [];
-    this.boosting = false;
-    this.boostFuel = BOOST_FUEL_MAX;
-    this.camera.scrollSpeed = this.baseScrollSpeed;
-    this.camera.resume();
-  }
-
-  // ── HUD ───────────────────────────────────────────────────────
-
-  private renderHUD(r: Renderer): void {
-    // Top bar
-    r.fillRect(0, 0, this.screenWidth, 14, 'rgba(0,0,0,0.6)');
-    r.drawText(`M${this.mission.id}: ${this.mission.name}`, 4, 10, '#88aacc', 8);
-    r.drawText(`SCORE: ${this.gameState.score}`, 170, 10, '#cccccc', 8);
-
-    // Bottom bar
-    r.fillRect(0, this.screenHeight - 18, this.screenWidth, 18, 'rgba(0,0,0,0.6)');
-    r.drawText(`LIVES: ${this.gameState.lives}`, 4, this.screenHeight - 8, '#cccccc', 8);
-
-    // Altitude bar
-    const altBarX = 62;
-    const altBarW = 30;
-    const barH = 5;
-    const barY = this.screenHeight - 12;
-    r.drawText('ALT', 47, this.screenHeight - 8, '#88cc88', 7);
-    r.strokeRect(altBarX, barY, altBarW, barH, '#446644', 1);
-    r.fillRect(altBarX, barY, (this.playerAltitude / PLAYER_MAX_ALTITUDE) * altBarW, barH, '#88cc88');
-
-    // Missile cooldown indicator
-    const mslReady = this.missileCooldown <= 0;
-    const mslColor = mslReady ? '#ffaa22' : '#554422';
-    r.drawText('MSL', 100, this.screenHeight - 8, mslColor, 7);
-    if (!mslReady) {
-      const mslBarX = 118;
-      const mslPct = 1 - this.missileCooldown / MISSILE_COOLDOWN;
-      r.strokeRect(mslBarX, barY, altBarW, barH, '#443322', 1);
-      r.fillRect(mslBarX, barY, mslPct * altBarW, barH, '#886633');
-    } else {
-      r.drawText('RDY', 118, this.screenHeight - 8, '#ffaa22', 7);
-    }
-
-    // Boost fuel gauge
-    const boostColor = this.boosting ? '#44ddff' : '#447788';
-    r.drawText('BST', 155, this.screenHeight - 8, boostColor, 7);
-    const bstBarX = 173;
-    const bstBarW = 30;
-    r.strokeRect(bstBarX, barY, bstBarW, barH, '#334455', 1);
-    r.fillRect(bstBarX, barY, this.boostFuel * bstBarW, barH, this.boosting ? '#44ddff' : '#447788');
-
-    // Progress
-    r.drawText(`${Math.floor(this.camera.progress * 100)}%`, this.screenWidth - 30, this.screenHeight - 8, '#888888', 8);
-
-    // Boost screen effect
-    if (this.boosting) {
-      r.fillRect(0, 0, this.screenWidth, 2, 'rgba(68,221,255,0.15)');
-      r.fillRect(0, this.screenHeight - 2, this.screenWidth, 2, 'rgba(68,221,255,0.15)');
-    }
-
-    // Controls hint
-    if (this.camera.scrollY < 5) {
-      r.drawText('A:Fire  B:Missile  C:Boost  D-Pad:Move+Alt', 8, this.screenHeight - 26, '#556677', 8);
-    }
-  }
-
-  private renderLevelComplete(r: Renderer): void {
-    r.fillRect(0, 90, this.screenWidth, 60, 'rgba(0,0,0,0.7)');
-    r.drawText('MISSION COMPLETE', 65, 118, '#ffcc00', 12);
-    r.drawText(`SCORE: ${this.gameState.score}`, 90, 135, '#cccccc', 8);
+    const s = this.state;
+    s.playerX = s.screenWidth / 2;
+    s.prevPlayerX = s.playerX;
+    s.playerAltitude = 2;
+    s.prevAltitude = 2;
+    s.alive = true;
+    s.exploding = false;
+    s.explosionTimer = 0;
+    s.respawnTimer = 0;
+    s.invincibleTimer = 2.0;
+    s.resetCombat();
+    s.camera.scrollSpeed = s.baseScrollSpeed;
+    s.camera.resume();
   }
 }

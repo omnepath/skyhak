@@ -11,7 +11,7 @@ import { KeyboardAdapter } from './input/KeyboardAdapter';
 import { GamepadAdapter } from './input/GamepadAdapter';
 import { TouchAdapter } from './input/TouchAdapter';
 import { DEFAULT_INPUT_CONFIG } from './input/InputMap';
-import type { InputConfig } from './input/InputMap';
+import type { InputConfig, ButtonName } from './input/InputMap';
 import { DEFAULT_TOUCH_LAYOUT } from './input/TouchLayout';
 import type { TouchOverlayLayout } from './input/TouchLayout';
 import { InputSnapshot } from './input/InputSnapshot';
@@ -148,11 +148,11 @@ export class Engine implements EngineAPI {
     touch?: Partial<TouchOverlayLayout>;
   }): void {
     if (overrides.keyboard) {
-      this._inputConfig.keyboard = { ...this._inputConfig.keyboard, ...overrides.keyboard };
+      this._inputConfig.keyboard = { ...this._inputConfig.keyboard, ...overrides.keyboard } as Record<string, ButtonName[]>;
       this.keyboardAdapter.updateMap(this._inputConfig);
     }
     if (overrides.gamepad) {
-      this._inputConfig.gamepad = { ...this._inputConfig.gamepad, ...overrides.gamepad };
+      this._inputConfig.gamepad = { ...this._inputConfig.gamepad, ...overrides.gamepad } as Record<string, ButtonName[]>;
       this.gamepadAdapter.updateMap(this._inputConfig);
     }
     if (overrides.touch) {
