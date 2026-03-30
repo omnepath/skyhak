@@ -10,8 +10,10 @@ import { InputManager } from './input/InputManager';
 import { KeyboardAdapter } from './input/KeyboardAdapter';
 import { GamepadAdapter } from './input/GamepadAdapter';
 import { TouchAdapter } from './input/TouchAdapter';
-import { DEFAULT_INPUT_MAP } from './input/InputMap';
+import { DEFAULT_INPUT_CONFIG } from './input/InputMap';
+import type { InputConfig } from './input/InputMap';
 import { DEFAULT_TOUCH_LAYOUT } from './input/TouchLayout';
+import type { TouchOverlayLayout } from './input/TouchLayout';
 import { InputSnapshot } from './input/InputSnapshot';
 import { EventBus } from './events/EventBus';
 import { DataRegistry } from './data/DataRegistry';
@@ -45,6 +47,10 @@ export class Engine implements EngineAPI {
   private _isMobile: boolean;
   private _viewportElement: HTMLElement | null = null;
 
+  // Input configuration — defaults can be overridden by game modules
+  private _inputConfig: InputConfig;
+  private _touchLayout: TouchOverlayLayout;
+
   constructor(engineConfig: Partial<EngineConfig> = {}) {
     const cfg = { ...DEFAULT_ENGINE_CONFIG, ...engineConfig };
     this.config = {
@@ -60,9 +66,13 @@ export class Engine implements EngineAPI {
     // Detect mobile
     this._isMobile = this.detectMobile();
 
+    // Input config (defaults, overridable by game modules)
+    this._inputConfig = { ...DEFAULT_INPUT_CONFIG };
+    this._touchLayout = { ...DEFAULT_TOUCH_LAYOUT, buttons: [...DEFAULT_TOUCH_LAYOUT.buttons] };
+
     // Input adapters
-    this.keyboardAdapter = new KeyboardAdapter(DEFAULT_INPUT_MAP);
-    this.gamepadAdapter = new GamepadAdapter(DEFAULT_INPUT_MAP);
+    this.keyboardAdapter = new KeyboardAdapter(this._inputConfig);
+    this.gamepadAdapter = new GamepadAdapter(this._inputConfig);
     this.inputManager = new InputManager();
 
     // Events & Data
@@ -121,6 +131,59 @@ export class Engine implements EngineAPI {
     if (this._viewportElement) {
       this.applyInputMode(mode);
     }
+  }
+
+  /**
+   * Override input configuration. Game modules call this during
+   * register() or init() to customize controls.
+   *
+   * Partial overrides are merged with defaults — provide only what
+   * you want to change.
+   *
+   * Config hierarchy: engine defaults → game module → external override
+   */
+  configureInput(overrides: {
+    keyboard?: Partial<InputConfig['keyboard']>;
+    gamepad?: Partial<InputConfig['gamepad']>;
+    touch?: Partial<TouchOverlayLayout>;
+  }): void {
+    if (overrides.keyboard) {
+      this._inputConfig.keyboard = { ...this._inputConfig.keyboard, ...overrides.keyboard };
+      this.keyboardAdapter.updateMap(this._inputConfig);
+    }
+    if (overrides.gamepad) {
+      this._inputConfig.gamepad = { ...this._inputConfig.gamepad, ...overrides.gamepad };
+      this.gamepadAdapter.updateMap(this._inputConfig);
+    }
+    if (overrides.touch) {
+      if (overrides.touch.buttons) {
+        this._touchLayout.buttons = overrides.touch.buttons;
+      }
+      if (overrides.touch.dpad) {
+        this._touchLayout.dpad = overrides.touch.dpad;
+      }
+      if (overrides.touch.opacity !== undefined) {
+        this._touchLayout.opacity = overrides.touch.opacity;
+      }
+      // Re-apply if touch is active
+      if (this.touchAdapter && this._viewportElement) {
+        this.touchAdapter.dispose();
+        this.inputManager.removeAdapter('touch');
+        this.touchAdapter = new TouchAdapter(this._touchLayout);
+        this.touchAdapter.attachTo(this._viewportElement);
+        this.inputManager.addAdapter(this.touchAdapter);
+      }
+    }
+    this.events.emit('input:config-changed', { config: this._inputConfig });
+  }
+
+  /**
+   * Apply an external input config override (e.g. controller profile).
+   * Same as configureInput but emits a different event for tracking.
+   */
+  applyInputOverride(overrides: Parameters<Engine['configureInput']>[0]): void {
+    this.configureInput(overrides);
+    this.events.emit('input:override-applied', { overrides });
   }
 
   /** Set touch overlay opacity (0 = hidden, 1 = fully visible) */

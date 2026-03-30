@@ -1,23 +1,14 @@
 /**
  * Title screen — press START to begin.
  *
- * The module defines which engine actions trigger "start game".
- * This keeps the game logic decoupled from specific input devices.
+ * Uses physical button names from the engine input system.
  */
 
 import type { EngineAPI, GameMode } from '../../engine/interfaces';
 import type { GameState } from '../GameState';
 
-/**
- * Engine actions that the module considers "start game".
- * Maps physical inputs → abstract consequence without the engine
- * needing to know what "start game" means.
- *
- * - 'confirm' ← Enter key, gamepad A, touch Start button
- * - 'fire'    ← Space/Z key, gamepad A
- * - 'pause'   ← touch Start button (also emits confirm, but belt-and-suspenders)
- */
-const START_GAME_ACTIONS = ['confirm', 'fire', 'pause'] as const;
+/** Physical buttons that trigger "start game" */
+const START_BUTTONS = ['start', 'A'] as const;
 
 export class TitleMode implements GameMode {
   readonly id = 'title';
@@ -58,7 +49,7 @@ export class TitleMode implements GameMode {
       }
     }
 
-    if (START_GAME_ACTIONS.some((a) => engine.input.isPressed(a))) {
+    if (START_BUTTONS.some((b) => engine.input.isPressed(b))) {
       engine.setMode('isometric');
     }
   }
