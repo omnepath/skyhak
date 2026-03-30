@@ -1,7 +1,7 @@
 /**
  * Immutable snapshot of input state for a single game tick.
- * Uses abstract action names (not raw keys) so game modes
- * are decoupled from physical input devices.
+ * Uses physical button names (A, B, dpadUp, start, etc.)
+ * so game modes are decoupled from physical input devices.
  */
 export class InputSnapshot {
   private held: ReadonlySet<string>;
@@ -18,19 +18,19 @@ export class InputSnapshot {
     this.released = released;
   }
 
-  /** Is the action currently held down? */
-  isHeld(action: string): boolean {
-    return this.held.has(action);
+  /** Is the button currently held down? */
+  isHeld(button: string): boolean {
+    return this.held.has(button);
   }
 
-  /** Was the action just pressed this tick? */
-  isPressed(action: string): boolean {
-    return this.pressed.has(action);
+  /** Was the button just pressed this tick? */
+  isPressed(button: string): boolean {
+    return this.pressed.has(button);
   }
 
-  /** Was the action just released this tick? */
-  isReleased(action: string): boolean {
-    return this.released.has(action);
+  /** Was the button just released this tick? */
+  isReleased(button: string): boolean {
+    return this.released.has(button);
   }
 
   static empty(): InputSnapshot {

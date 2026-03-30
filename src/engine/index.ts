@@ -14,7 +14,8 @@ export type { EngineAPI, GameMode, GameModule, ModeManagerAPI } from './interfac
 export type { Renderer } from './render/Renderer';
 export type { InputAdapter } from './input/InputAdapter';
 export { TouchAdapter } from './input/TouchAdapter';
-export { DEFAULT_TOUCH_LAYOUT, type TouchOverlayLayout } from './input/TouchLayout';
+export { DEFAULT_TOUCH_LAYOUT, type TouchOverlayLayout, type TouchButtonDef, type DPadDef } from './input/TouchLayout';
+export { DEFAULT_INPUT_CONFIG, type InputConfig, type ButtonName } from './input/InputMap';
 export type { Vec2, Vec3, Rect, Color, SpriteRef, DrawOpts, EngineConfig } from './types';
 export { DEFAULT_ENGINE_CONFIG } from './types';
 

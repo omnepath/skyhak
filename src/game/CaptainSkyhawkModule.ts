@@ -3,6 +3,16 @@
  *
  * Registers all game modes, data, and assets with the engine.
  * This is THE game — the engine is the platform.
+ *
+ * Button → Game Action mapping (module-owned):
+ *   A       → fire (primary weapon)
+ *   B       → missile spread
+ *   C       → boost
+ *   X, Y    → (reserved for future weapons/abilities)
+ *   L, R    → (reserved for future shoulder actions)
+ *   dpad*   → movement + altitude
+ *   start   → start / pause
+ *   select  → (reserved)
  */
 
 import type { EngineAPI, GameModule, ModeManagerAPI } from '../engine/interfaces';
@@ -17,7 +27,7 @@ export class CaptainSkyhawkModule implements GameModule {
 
   private gameState = new GameState();
 
-  register(_engine: EngineAPI, modeManager: ModeManagerAPI): void {
+  register(engine: EngineAPI, modeManager: ModeManagerAPI): void {
     modeManager.registerMode(new TitleMode(this.gameState));
     modeManager.registerMode(new IsometricMode(this.gameState));
     modeManager.registerMode(new GameOverMode(this.gameState));
@@ -29,6 +39,13 @@ export class CaptainSkyhawkModule implements GameModule {
     // modeManager.registerMode(new BossMode(this.gameState));
 
     modeManager.setInitialMode('title');
+
+    // Module can customize input mappings if needed.
+    // Engine defaults are fine for now — override example:
+    // engine.configureInput({
+    //   keyboard: { 'KeyF': ['A'] },   // F key also fires
+    //   touch: { opacity: 0.4 },
+    // });
   }
 
   init(_engine: EngineAPI): void {

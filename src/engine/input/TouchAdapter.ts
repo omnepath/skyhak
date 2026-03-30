@@ -253,19 +253,19 @@ export class TouchAdapter implements InputAdapter {
     const absAngle = Math.abs(angle);
 
     if (absAngle < Math.PI * 3 / 8) {
-      this.currentActions.add('moveRight');
+      this.currentActions.add('dpadRight');
       this.activeVisualIds.add('dpad_right');
     }
     if (absAngle > Math.PI * 5 / 8) {
-      this.currentActions.add('moveLeft');
+      this.currentActions.add('dpadLeft');
       this.activeVisualIds.add('dpad_left');
     }
     if (angle > Math.PI / 8 && angle < Math.PI * 7 / 8) {
-      this.currentActions.add('moveDown');
+      this.currentActions.add('dpadDown');
       this.activeVisualIds.add('dpad_down');
     }
     if (angle < -Math.PI / 8 && angle > -Math.PI * 7 / 8) {
-      this.currentActions.add('moveUp');
+      this.currentActions.add('dpadUp');
       this.activeVisualIds.add('dpad_up');
     }
   }
@@ -274,9 +274,9 @@ export class TouchAdapter implements InputAdapter {
     const btn = this.layout.buttons.find((b) => b.id === touch.target);
     if (!btn) return;
 
-    const actions = Array.isArray(btn.action) ? btn.action : [btn.action];
-    for (const a of actions) {
-      this.currentActions.add(a);
+    const buttons = Array.isArray(btn.button) ? btn.button : [btn.button];
+    for (const b of buttons) {
+      this.currentActions.add(b);
     }
     this.activeVisualIds.add(btn.id);
   }

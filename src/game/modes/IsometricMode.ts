@@ -157,10 +157,10 @@ export class IsometricMode implements GameMode {
     this.prevAltitude = this.playerAltitude;
 
     const input = engine.input;
-    if (input.isHeld('moveLeft'))  this.playerX -= PLAYER_SPEED_X * dt;
-    if (input.isHeld('moveRight')) this.playerX += PLAYER_SPEED_X * dt;
-    if (input.isHeld('moveUp'))    this.playerAltitude += PLAYER_ALTITUDE_SPEED * dt;
-    if (input.isHeld('moveDown'))  this.playerAltitude -= PLAYER_ALTITUDE_SPEED * dt;
+    if (input.isHeld('dpadLeft'))  this.playerX -= PLAYER_SPEED_X * dt;
+    if (input.isHeld('dpadRight')) this.playerX += PLAYER_SPEED_X * dt;
+    if (input.isHeld('dpadUp'))    this.playerAltitude += PLAYER_ALTITUDE_SPEED * dt;
+    if (input.isHeld('dpadDown'))  this.playerAltitude -= PLAYER_ALTITUDE_SPEED * dt;
 
     const minX = this.terrainOffsetX + JET_WIDTH / 2;
     const maxX = this.terrainOffsetX + TERRAIN_COLS * TERRAIN_TILE_W - JET_WIDTH / 2;
@@ -169,20 +169,20 @@ export class IsometricMode implements GameMode {
 
     // Player fire (A button)
     this.playerFireCooldown = Math.max(0, this.playerFireCooldown - dt);
-    if (input.isHeld('fire') && this.playerFireCooldown <= 0) {
+    if (input.isHeld('A') && this.playerFireCooldown <= 0) {
       this.spawnPlayerBullet();
       this.playerFireCooldown = PLAYER_FIRE_COOLDOWN;
     }
 
     // Missile spread (B button)
     this.missileCooldown = Math.max(0, this.missileCooldown - dt);
-    if (input.isPressed('altFire') && this.missileCooldown <= 0) {
+    if (input.isPressed('B') && this.missileCooldown <= 0) {
       this.spawnMissileSpread();
       this.missileCooldown = MISSILE_COOLDOWN;
     }
 
     // Boost (C button) — hold to burn, release to recharge
-    this.boosting = input.isHeld('special') && this.boostFuel > BOOST_MIN_FUEL;
+    this.boosting = input.isHeld('C') && this.boostFuel > BOOST_MIN_FUEL;
     if (this.boosting) {
       this.boostFuel = Math.max(0, this.boostFuel - BOOST_BURN_RATE * dt);
       this.camera.scrollSpeed = this.baseScrollSpeed * BOOST_SPEED_MULTIPLIER;

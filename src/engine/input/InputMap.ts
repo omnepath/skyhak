@@ -1,89 +1,106 @@
 /**
- * Configurable mapping from physical inputs to abstract actions.
- * Supports multiple keys per action and multiple actions per key.
+ * Input configuration: maps physical inputs to button names.
+ *
+ * The engine speaks in physical button names that correspond to
+ * a generic game controller: A, B, X, Y, C, L, R, dpadUp, etc.
+ * These are device-level names — the engine doesn't know what
+ * "fire" or "boost" means.
+ *
+ * Game modules map these button names to game-specific actions
+ * via their own ActionMap.
+ *
+ * Config hierarchy:
+ * 1. Engine provides DEFAULT_INPUT_CONFIG (sensible defaults)
+ * 2. Game module can override via engine.configureInput()
+ * 3. Future: external controller profiles can override further
  */
 
-/** Standard game actions */
-export type GameAction =
-  | 'moveLeft'
-  | 'moveRight'
-  | 'moveUp'
-  | 'moveDown'
-  | 'fire'       // A button
-  | 'altFire'    // B button
-  | 'special'    // C button
-  | 'actionX'    // X button
-  | 'actionY'    // Y button
-  | 'bumperL'    // L bumper
-  | 'bumperR'    // R bumper
-  | 'pause'
-  | 'confirm'
-  | 'cancel';
+/** Standard physical button names the engine understands */
+export type ButtonName =
+  | 'dpadUp'
+  | 'dpadDown'
+  | 'dpadLeft'
+  | 'dpadRight'
+  | 'A'
+  | 'B'
+  | 'X'
+  | 'Y'
+  | 'C'
+  | 'L'
+  | 'R'
+  | 'start'
+  | 'select';
 
-export interface InputMapConfig {
-  keyboard: Record<string, GameAction[]>;
-  gamepad?: Record<string, GameAction[]>;
+/** Maps physical key codes / gamepad inputs → button names */
+export interface InputConfig {
+  keyboard: Record<string, ButtonName[]>;
+  gamepad: Record<string, ButtonName[]>;
 }
 
 /**
  * Default keyboard mapping.
  *
- * Left hand: WASD for movement.
+ * Left hand: WASD + arrows for d-pad.
  * Right hand: SNES-style diamond on JKL/I keys:
  *       I (X)
  *   J (Y)   L (A)
  *       K (B)
- * Plus: U = C (special), O = R bumper, Q/Tab = L bumper
- *
- * Legacy: arrows for movement, Space/Z = fire
+ * Plus: U = C, O = R, Q = L
+ * Space/Z = A (legacy), X key = B (legacy), C key = C (legacy)
+ * Enter = start, Backspace/Escape = select
  */
-export const DEFAULT_INPUT_MAP: InputMapConfig = {
+export const DEFAULT_INPUT_CONFIG: InputConfig = {
   keyboard: {
-    // Movement — left hand (WASD) + arrows
-    'ArrowLeft': ['moveLeft'],
-    'ArrowRight': ['moveRight'],
-    'ArrowUp': ['moveUp'],
-    'ArrowDown': ['moveDown'],
-    'KeyA': ['moveLeft'],
-    'KeyD': ['moveRight'],
-    'KeyW': ['moveUp'],
-    'KeyS': ['moveDown'],
+    // D-pad — left hand (WASD) + arrows
+    'ArrowLeft':  ['dpadLeft'],
+    'ArrowRight': ['dpadRight'],
+    'ArrowUp':    ['dpadUp'],
+    'ArrowDown':  ['dpadDown'],
+    'KeyA':       ['dpadLeft'],
+    'KeyD':       ['dpadRight'],
+    'KeyW':       ['dpadUp'],
+    'KeyS':       ['dpadDown'],
 
     // Action buttons — right hand diamond (JKLI)
-    'KeyL': ['fire'],         // A — right of diamond
-    'KeyK': ['altFire'],      // B — bottom of diamond
-    'KeyJ': ['actionY'],      // Y — left of diamond
-    'KeyI': ['actionX'],      // X — top of diamond
-    'KeyU': ['special'],      // C — above-left
-    'KeyO': ['bumperR'],      // R bumper
-    'KeyQ': ['bumperL'],      // L bumper
+    'KeyL': ['A'],
+    'KeyK': ['B'],
+    'KeyI': ['X'],
+    'KeyJ': ['Y'],
+    'KeyU': ['C'],
+    'KeyO': ['R'],
+    'KeyQ': ['L'],
 
     // Legacy / convenience
-    'Space': ['fire'],
-    'KeyZ': ['fire'],
-    'KeyX': ['altFire'],
-    'KeyC': ['special'],
+    'Space': ['A'],
+    'KeyZ':  ['A'],
+    'KeyX':  ['B'],
+    'KeyC':  ['C'],
 
     // System
-    'Escape': ['pause'],
-    'Enter': ['confirm', 'pause'],
-    'Backspace': ['cancel'],
+    'Enter':     ['start'],
+    'Escape':    ['select'],
+    'Backspace': ['select'],
   },
   gamepad: {
-    'button0': ['fire', 'confirm'],     // A
-    'button1': ['altFire', 'cancel'],   // B
-    'button2': ['actionX'],             // X
-    'button3': ['actionY'],             // Y
-    'button4': ['bumperL'],             // L bumper
-    'button5': ['bumperR'],             // R bumper
-    'button9': ['pause'],
-    'axisLeft-': ['moveLeft'],
-    'axisLeft+': ['moveRight'],
-    'axisUp-': ['moveUp'],
-    'axisUp+': ['moveDown'],
-    'dpadLeft': ['moveLeft'],
-    'dpadRight': ['moveRight'],
-    'dpadUp': ['moveUp'],
-    'dpadDown': ['moveDown'],
+    'button0':  ['A'],
+    'button1':  ['B'],
+    'button2':  ['X'],
+    'button3':  ['Y'],
+    'button4':  ['L'],
+    'button5':  ['R'],
+    'button9':  ['start'],
+    'button8':  ['select'],
+    'axisLeft-':  ['dpadLeft'],
+    'axisLeft+':  ['dpadRight'],
+    'axisUp-':    ['dpadUp'],
+    'axisUp+':    ['dpadDown'],
+    'dpadLeft':   ['dpadLeft'],
+    'dpadRight':  ['dpadRight'],
+    'dpadUp':     ['dpadUp'],
+    'dpadDown':   ['dpadDown'],
   },
 };
+
+// ── Backward compatibility re-export ─────────────────────
+// Adapters use InputConfig now, but the interface shape is the same
+export type InputMapConfig = InputConfig;

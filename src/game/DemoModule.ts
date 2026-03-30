@@ -44,10 +44,10 @@ class DemoMode implements GameMode {
 
     let dx = 0;
     let dy = 0;
-    if (input.isHeld('moveLeft')) dx -= 1;
-    if (input.isHeld('moveRight')) dx += 1;
-    if (input.isHeld('moveUp')) dy -= 1;
-    if (input.isHeld('moveDown')) dy += 1;
+    if (input.isHeld('dpadLeft')) dx -= 1;
+    if (input.isHeld('dpadRight')) dx += 1;
+    if (input.isHeld('dpadUp')) dy -= 1;
+    if (input.isHeld('dpadDown')) dy += 1;
 
     this.jetX += dx * this.jetSpeed * dt;
     this.jetY += dy * this.jetSpeed * dt;

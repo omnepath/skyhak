@@ -23,7 +23,7 @@ export class GameOverMode implements GameMode {
     this.time += dt;
 
     // Return to title after input or timeout
-    const anyStart = engine.input.isPressed('confirm') || engine.input.isPressed('fire') || engine.input.isPressed('pause');
+    const anyStart = engine.input.isPressed('start') || engine.input.isPressed('A');
     if (this.time > 2.0 && anyStart) {
       engine.setMode('title');
     }
