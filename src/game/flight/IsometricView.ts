@@ -1,19 +1,38 @@
 /**
  * Isometric (top-down) view renderer for flight mode.
- * Extracted from IsometricMode — renders terrain, enemies, projectiles,
- * player jet, explosions, and HUD from the classic overhead perspective.
+ * Projects world-space entity positions to isometric screen coordinates.
+ * Terrain rendering delegated to TerrainRenderer (using synced iso camera).
  */
 
 import type { Renderer } from '../../engine/render/Renderer';
-import type { FlightState, ExplosionParticle } from './FlightState';
+import type { FlightState } from './FlightState';
 import type { FlightView, ViewMode } from './FlightView';
-import type { Projectile, Enemy } from '../entities/Entities';
-import { ENEMY_DEFS, MISSILE_COOLDOWN, BOOST_FUEL_MAX } from '../entities/Entities';
+import type { Position } from '../ecs/Components';
+import {
+  CELL_SIZE, Z_UNIT, ISO_ALT_PX, PLAYER_AHEAD,
+  ENEMY_RENDER, MISSILE_COOLDOWN_TIME,
+} from '../ecs/Components';
+import { TERRAIN_TILE_H } from '../data/terrain';
 import { TerrainRenderer } from '../isometric/TerrainRenderer';
 
-const PLAYER_SCREEN_Y = 200;
+// Player is always at this screen Y (derived from PLAYER_AHEAD)
+const PLAYER_SCREEN_Y = 200; // 240 - (80/28) * 14
 const JET_WIDTH = 16;
 const JET_HEIGHT = 16;
+
+/** Project a world position to isometric screen coordinates */
+function toScreen(
+  pos: Position,
+  cameraWorldY: number,
+  terrainOffsetX: number,
+  screenHeight: number,
+): { sx: number; sy: number } {
+  const sx = pos.x + terrainOffsetX;
+  const rowsAhead = (pos.y - cameraWorldY) / CELL_SIZE;
+  const screenY = screenHeight - rowsAhead * TERRAIN_TILE_H;
+  const altPx = (pos.z / Z_UNIT) * ISO_ALT_PX;
+  return { sx, sy: screenY - altPx };
+}
 
 export class IsometricView implements FlightView {
   readonly mode: ViewMode = 'isometric';
@@ -21,13 +40,13 @@ export class IsometricView implements FlightView {
 
   activate(state: FlightState): void {
     this.terrainRenderer = new TerrainRenderer(
-      state.terrain, state.palette, state.screenWidth,
+      state.rawTerrain, state.palette, state.screenWidth,
     );
   }
 
   render(r: Renderer, state: FlightState, alpha: number): void {
     r.clear(state.palette.background);
-    this.terrainRenderer.render(r, state.camera);
+    this.terrainRenderer.render(r, state.isoCamera);
     this.renderEnemies(r, state);
     this.renderProjectiles(r, state);
 
@@ -42,6 +61,8 @@ export class IsometricView implements FlightView {
   renderHUD(r: Renderer, state: FlightState): void {
     const sw = state.screenWidth;
     const sh = state.screenHeight;
+    const playerPos = state.world.pos.get(state.playerId);
+    const altitude = playerPos ? playerPos.z / Z_UNIT : 0;
 
     // Top bar
     r.fillRect(0, 0, sw, 14, 'rgba(0,0,0,0.6)');
@@ -59,15 +80,15 @@ export class IsometricView implements FlightView {
     const barY = sh - 12;
     r.drawText('ALT', 47, sh - 8, '#88cc88', 7);
     r.strokeRect(altBarX, barY, altBarW, barH, '#446644', 1);
-    r.fillRect(altBarX, barY, (state.playerAltitude / 4) * altBarW, barH, '#88cc88');
+    r.fillRect(altBarX, barY, (altitude / 4) * altBarW, barH, '#88cc88');
 
     // Missile cooldown
-    const mslReady = state.missileCooldown <= 0;
+    const mslReady = state.missileCD <= 0;
     const mslColor = mslReady ? '#ffaa22' : '#554422';
     r.drawText('MSL', 100, sh - 8, mslColor, 7);
     if (!mslReady) {
       const mslBarX = 118;
-      const mslPct = 1 - state.missileCooldown / MISSILE_COOLDOWN;
+      const mslPct = 1 - state.missileCD / MISSILE_COOLDOWN_TIME;
       r.strokeRect(mslBarX, barY, altBarW, barH, '#443322', 1);
       r.fillRect(mslBarX, barY, mslPct * altBarW, barH, '#886633');
     } else {
@@ -83,7 +104,8 @@ export class IsometricView implements FlightView {
     r.fillRect(bstBarX, barY, state.boostFuel * bstBarW, barH, state.boosting ? '#44ddff' : '#447788');
 
     // Progress
-    r.drawText(`${Math.floor(state.camera.progress * 100)}%`, sw - 30, sh - 8, '#888888', 8);
+    const progress = state.isoCamera.progress;
+    r.drawText(`${Math.floor(progress * 100)}%`, sw - 30, sh - 8, '#888888', 8);
 
     // Boost screen effect
     if (state.boosting) {
@@ -91,8 +113,8 @@ export class IsometricView implements FlightView {
       r.fillRect(0, sh - 2, sw, 2, 'rgba(68,221,255,0.15)');
     }
 
-    // Controls hint
-    if (state.camera.scrollY < 5) {
+    // Controls hint at start
+    if (state.cameraWorldY < 5 * CELL_SIZE) {
       r.drawText('A:Fire  B:Missile  C:Boost  SEL:View', 8, sh - 26, '#556677', 8);
     }
 
@@ -107,87 +129,95 @@ export class IsometricView implements FlightView {
   // ── Player ──────────────────────────────────────────────────
 
   private renderPlayer(r: Renderer, state: FlightState, alpha: number): void {
-    const px = state.prevPlayerX + (state.playerX - state.prevPlayerX) * alpha;
-    const alt = state.prevAltitude + (state.playerAltitude - state.prevAltitude) * alpha;
-    const altOffset = alt * 3;
-    const jetY = PLAYER_SCREEN_Y - altOffset;
+    const pos = state.world.pos.get(state.playerId)!;
+
+    // Interpolate
+    const wx = state.prevPlayerX + (pos.x - state.prevPlayerX) * alpha;
+    const wz = state.prevPlayerZ + (pos.z - state.prevPlayerZ) * alpha;
+
+    const sx = wx + state.terrainOffsetX;
+    const altPx = (wz / Z_UNIT) * ISO_ALT_PX;
+    const jetY = PLAYER_SCREEN_Y - altPx;
 
     // Invincibility blink
     if (state.invincibleTimer > 0 && Math.floor(state.invincibleTimer * 10) % 2 === 0) {
       return;
     }
 
-    // Shadow
-    const shadowAlpha = Math.max(0.1, 0.4 - alt * 0.08);
-    const shadowScale = 1 + alt * 0.1;
+    // Shadow at ground level
+    const altLevel = wz / Z_UNIT;
+    const shadowAlpha = Math.max(0.1, 0.4 - altLevel * 0.08);
+    const shadowScale = 1 + altLevel * 0.1;
     r.fillPoly([
-      { x: px, y: PLAYER_SCREEN_Y - 3 },
-      { x: px + JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
-      { x: px, y: PLAYER_SCREEN_Y + 5 },
-      { x: px - JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
+      { x: sx, y: PLAYER_SCREEN_Y - 3 },
+      { x: sx + JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
+      { x: sx, y: PLAYER_SCREEN_Y + 5 },
+      { x: sx - JET_WIDTH / 2 * shadowScale, y: PLAYER_SCREEN_Y + 2 },
     ], `rgba(0,0,0,${shadowAlpha})`);
 
     // Jet body
     r.fillPoly([
-      { x: px, y: jetY - JET_HEIGHT / 2 },
-      { x: px + JET_WIDTH / 2, y: jetY + 2 },
-      { x: px, y: jetY + JET_HEIGHT / 2 },
-      { x: px - JET_WIDTH / 2, y: jetY + 2 },
+      { x: sx, y: jetY - JET_HEIGHT / 2 },
+      { x: sx + JET_WIDTH / 2, y: jetY + 2 },
+      { x: sx, y: jetY + JET_HEIGHT / 2 },
+      { x: sx - JET_WIDTH / 2, y: jetY + 2 },
     ], state.palette.playerJet);
 
     // Cockpit
     r.fillPoly([
-      { x: px, y: jetY - 4 },
-      { x: px + 3, y: jetY + 1 },
-      { x: px, y: jetY + 4 },
-      { x: px - 3, y: jetY + 1 },
+      { x: sx, y: jetY - 4 },
+      { x: sx + 3, y: jetY + 1 },
+      { x: sx, y: jetY + 4 },
+      { x: sx - 3, y: jetY + 1 },
     ], state.palette.playerHighlight);
 
     // Engine glow
     const flicker = Math.sin(state.engineTime * 20) * 0.5 + 0.5;
-    r.fillRect(px - 2, jetY + JET_HEIGHT / 2 - 1, 4, 2 + flicker * 2, state.palette.playerEngine);
+    r.fillRect(sx - 2, jetY + JET_HEIGHT / 2 - 1, 4, 2 + flicker * 2, state.palette.playerEngine);
 
-    // Altitude tick marks
-    for (let i = 0; i < Math.floor(alt); i++) {
+    // Altitude ticks
+    for (let i = 0; i < Math.floor(altLevel); i++) {
       const wy = jetY + 1 - i;
-      r.drawLine(px - 6, wy, px - 4, wy, '#ffffff', 1);
-      r.drawLine(px + 4, wy, px + 6, wy, '#ffffff', 1);
+      r.drawLine(sx - 6, wy, sx - 4, wy, '#ffffff', 1);
+      r.drawLine(sx + 4, wy, sx + 6, wy, '#ffffff', 1);
     }
   }
 
   // ── Enemies ─────────────────────────────────────────────────
 
   private renderEnemies(r: Renderer, state: FlightState): void {
-    for (const enemy of state.enemies) {
-      if (enemy.dead || !enemy.active) continue;
+    const world = state.world;
 
-      const def = ENEMY_DEFS[enemy.type];
-      const screenY = state.camera.rowToScreenY(enemy.row);
-      if (screenY < -20 || screenY > state.screenHeight + 20) continue;
+    for (const [id, eai] of world.eai) {
+      if (!eai.active) continue;
+      const pos = world.pos.get(id);
+      if (!pos) continue;
 
-      const s = def.size;
-      const altOff = enemy.altitude * 3;
-      const ey = screenY - altOff;
+      const { sx, sy } = toScreen(pos, state.cameraWorldY, state.terrainOffsetX, state.screenHeight);
+      if (sy < -20 || sy > state.screenHeight + 20) continue;
 
-      r.fillPoly([
-        { x: enemy.x, y: ey - s },
-        { x: enemy.x + s, y: ey },
-        { x: enemy.x, y: ey + s * 0.6 },
-        { x: enemy.x - s, y: ey },
-      ], def.color);
+      const rend = ENEMY_RENDER[eai.eType];
+      const s = rend.size;
 
       r.fillPoly([
-        { x: enemy.x, y: ey - s * 0.5 },
-        { x: enemy.x + s * 0.4, y: ey },
-        { x: enemy.x, y: ey + s * 0.3 },
-        { x: enemy.x - s * 0.4, y: ey },
+        { x: sx, y: sy - s },
+        { x: sx + s, y: sy },
+        { x: sx, y: sy + s * 0.6 },
+        { x: sx - s, y: sy },
+      ], rend.color);
+
+      r.fillPoly([
+        { x: sx, y: sy - s * 0.5 },
+        { x: sx + s * 0.4, y: sy },
+        { x: sx, y: sy + s * 0.3 },
+        { x: sx - s * 0.4, y: sy },
       ], '#ff8866');
 
       // Health pip
-      if (enemy.health < ENEMY_DEFS[enemy.type].health) {
-        r.fillRect(enemy.x - 4, ey - s - 4, 8, 2, '#440000');
-        const hpPct = enemy.health / ENEMY_DEFS[enemy.type].health;
-        r.fillRect(enemy.x - 4, ey - s - 4, 8 * hpPct, 2, '#ff4444');
+      const hp = world.hp.get(id);
+      if (hp && hp.hp < hp.maxHp) {
+        r.fillRect(sx - 4, sy - s - 4, 8, 2, '#440000');
+        r.fillRect(sx - 4, sy - s - 4, 8 * (hp.hp / hp.maxHp), 2, '#ff4444');
       }
     }
   }
@@ -195,17 +225,26 @@ export class IsometricView implements FlightView {
   // ── Projectiles ─────────────────────────────────────────────
 
   private renderProjectiles(r: Renderer, state: FlightState): void {
-    for (const p of state.projectiles) {
-      if (p.type === 'bullet') {
-        r.fillRect(p.x - 1, p.y - 3, 2, 6, '#88eeff');
-        r.fillRect(p.x, p.y - 2, 1, 4, '#ffffff');
-      } else if (p.type === 'missile') {
-        r.fillRect(p.x - 1.5, p.y - 2, 3, 5, '#ffaa22');
-        r.fillRect(p.x - 0.5, p.y - 1, 1, 3, '#ffee88');
-        r.fillRect(p.x - 1, p.y + 3, 2, 2, 'rgba(200,200,200,0.4)');
+    const world = state.world;
+
+    for (const [id, proj] of world.proj) {
+      if (proj.life <= 0) continue;
+      const pos = world.pos.get(id);
+      if (!pos) continue;
+
+      const { sx, sy } = toScreen(pos, state.cameraWorldY, state.terrainOffsetX, state.screenHeight);
+      if (sy < -20 || sy > state.screenHeight + 20) continue;
+
+      if (proj.pType === 'bullet') {
+        r.fillRect(sx - 1, sy - 3, 2, 6, '#88eeff');
+        r.fillRect(sx, sy - 2, 1, 4, '#ffffff');
+      } else if (proj.pType === 'missile') {
+        r.fillRect(sx - 1.5, sy - 2, 3, 5, '#ffaa22');
+        r.fillRect(sx - 0.5, sy - 1, 1, 3, '#ffee88');
+        r.fillRect(sx - 1, sy + 3, 2, 2, 'rgba(200,200,200,0.4)');
       } else {
-        r.fillRect(p.x - 1.5, p.y - 1.5, 3, 3, '#ff6644');
-        r.fillRect(p.x - 0.5, p.y - 0.5, 1, 1, '#ffcc88');
+        r.fillRect(sx - 1.5, sy - 1.5, 3, 3, '#ff6644');
+        r.fillRect(sx - 0.5, sy - 0.5, 1, 1, '#ffcc88');
       }
     }
   }
@@ -214,8 +253,14 @@ export class IsometricView implements FlightView {
 
   private renderExplosion(r: Renderer, state: FlightState): void {
     for (const p of state.explosionParticles) {
+      const { sx, sy } = toScreen(
+        { x: p.x, y: p.y, z: Math.max(0, p.z) },
+        state.cameraWorldY,
+        state.terrainOffsetX,
+        state.screenHeight,
+      );
       const size = Math.max(1, 3 * (p.life / 1.0));
-      r.fillRect(p.x - size / 2, p.y - size / 2, size, size, p.color);
+      r.fillRect(sx - size / 2, sy - size / 2, size, size, p.color);
     }
   }
 }
